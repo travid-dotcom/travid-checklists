@@ -193,7 +193,7 @@
   .status-chip {
     border: none; border-radius: 999px; padding: 0.35em 0.7em; font-size: 0.8rem; font-weight: 700;
     color: #fff; display: inline-flex; align-items: center; gap: 0.3em; white-space: nowrap;
-    user-select: none; -webkit-user-select: none;
+    user-select: none; -webkit-user-select: none; touch-action: none;
   }
 
   .bulk-bar {
@@ -282,6 +282,20 @@
     display: flex; align-items: center; justify-content: center; font-size: 0.85em; flex-shrink: 0;
   }
   .speed-action.drag-hover { outline: 2px solid var(--accent); background: var(--accent-dim); }
+
+  .fab-intro {
+    position: fixed; right: 1.1rem; bottom: 5.2rem; z-index: 46; max-width: 220px;
+    background: var(--text); color: var(--bg); border-radius: 12px; padding: 0.75rem 0.9rem;
+    font-size: 0.82rem; box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  }
+  .fab-intro::after {
+    content: ""; position: absolute; bottom: -7px; right: 1.3rem; width: 14px; height: 14px;
+    background: var(--text); transform: rotate(45deg);
+  }
+  .fab-intro button {
+    display: block; margin-top: 0.5rem; background: transparent; border: 1px solid var(--bg);
+    color: var(--bg); font-size: 0.78rem; padding: 0.3em 0.7em; border-radius: 999px;
+  }
 
   .more-menu-wrap { position: relative; display: inline-block; }
   .more-menu {
@@ -385,10 +399,9 @@ const firebaseConfig = {
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
 
-const DEFAULT_USERS = ["Tracy", "David"];
-// People items can be packed for (broader than login users - includes kids).
-// Edit this list any time to add/remove household members.
-const HOUSEHOLD_PEOPLE = ["Tracy", "David", "Harper", "Beckett"];
+// Household/family membership now lives per-workspace (state.configDoc), not hardcoded here.
+function baseUsers() { return (state.configDoc && state.configDoc.baseUsers) || []; }
+function basePeople() { return (state.configDoc && state.configDoc.basePeople) || []; }
 const AUTO_ARCHIVE_DAYS = 14;
 
 const STATUSES = [
@@ -429,7 +442,7 @@ function getCustomStatusEntries(list, configDoc) {
 }
 // Effective "packing for" people: built-in household + any custom additions (global + this checklist).
 function computeEffectivePeople(list, configDoc) {
-  const names = [...HOUSEHOLD_PEOPLE];
+  const names = [...basePeople()];
   ((configDoc && configDoc.customPeople) || []).forEach(p => { if (!names.includes(p.name)) names.push(p.name); });
   ((list && list.customPeople) || []).forEach(p => { if (!names.includes(p.name)) names.push(p.name); });
   return names;
@@ -454,7 +467,12 @@ const CATEGORY_KEYWORDS = {
 /* ============================= STATE ============================= */
 let state = {
   pinOk: false,
+  workspaceId: null,
   configDoc: null,
+  gateStep: "enterPin", // "enterPin" | "newWorkspace"
+  pendingPin: null,
+  gateBusy: false,
+  gateError: "",
   user: localStorage.getItem("cl_user") || null,
   route: parseRoute(),
   lists: [],
@@ -551,43 +569,122 @@ function guessCategory(itemName, existingCategories, deletedCategories) {
 
 /* ============================= PIN / CONFIG ============================= */
 let unsubConfig = null;
-function initConfigListener() {
-  return new Promise(resolve => {
-    let first = true;
-    unsubConfig = onSnapshot(doc(db, "meta", "config"), snap => {
-      state.configDoc = snap.exists() ? snap.data() : null;
-      const savedPin = localStorage.getItem("cl_pin");
-      if (state.configDoc && savedPin && savedPin === state.configDoc.pin) {
-        state.pinOk = true;
-      }
-      if (first) { first = false; resolve(); }
-      else { render(); }
-    });
+function listenWorkspace(wsId) {
+  if (unsubConfig) unsubConfig();
+  unsubConfig = onSnapshot(doc(db, "workspaces", wsId), snap => {
+    if (snap.exists()) state.configDoc = snap.data();
+    render();
   });
 }
 
-async function submitPinSetup(pin) {
-  await setDoc(doc(db, "meta", "config"), { pin, customStatuses: [], customPeople: [] });
+// One-time, non-destructive copy of Tracy's original single-tenant data (top-level
+// `checklists` + `meta/config`) into the new workspace-scoped layout. Never deletes
+// the legacy data. Only runs when the pin the person entered matches the legacy pin.
+async function migrateLegacyToWorkspace(pin, legacyConfig) {
+  const wsData = {
+    pin,
+    baseUsers: ["Tracy", "David"],
+    basePeople: ["Tracy", "David", "Harper", "Beckett"],
+    customStatuses: legacyConfig.customStatuses || [],
+    customPeople: legacyConfig.customPeople || []
+  };
+  await setDoc(doc(db, "workspaces", pin), wsData);
+  const legacyListsSnap = await getDocs(collection(db, "checklists"));
+  for (const listDoc of legacyListsSnap.docs) {
+    const listData = listDoc.data();
+    await setDoc(doc(db, "workspaces", pin, "checklists", listDoc.id), listData);
+    const itemsSnap = await getDocs(collection(db, "checklists", listDoc.id, "items"));
+    let batch = writeBatch(db); let opCount = 0;
+    for (const itemDoc of itemsSnap.docs) {
+      batch.set(doc(db, "workspaces", pin, "checklists", listDoc.id, "items", itemDoc.id), itemDoc.data());
+      opCount++;
+      if (opCount >= 400) { await batch.commit(); batch = writeBatch(db); opCount = 0; }
+    }
+    if (opCount > 0) await batch.commit();
+    const activitySnap = await getDocs(collection(db, "checklists", listDoc.id, "activity"));
+    let aBatch = writeBatch(db); let aCount = 0;
+    for (const actDoc of activitySnap.docs) {
+      aBatch.set(doc(db, "workspaces", pin, "checklists", listDoc.id, "activity", actDoc.id), actDoc.data());
+      aCount++;
+      if (aCount >= 400) { await aBatch.commit(); aBatch = writeBatch(db); aCount = 0; }
+    }
+    if (aCount > 0) await aBatch.commit();
+  }
+  return wsData;
+}
+
+// Tries, in order: an existing workspace for this pin, then a legacy-data migration
+// if this happens to be the original single-tenant pin, then falls back to asking
+// whether to create a brand-new space.
+async function attemptLogin(pin, silent) {
+  state.gateBusy = true; if (!silent) render();
+  try {
+    const wsSnap = await getDoc(doc(db, "workspaces", pin));
+    if (wsSnap.exists()) {
+      state.workspaceId = pin;
+      state.configDoc = wsSnap.data();
+      localStorage.setItem("cl_pin", pin);
+      state.pinOk = true;
+      listenWorkspace(pin);
+      return true;
+    }
+    const legacySnap = await getDoc(doc(db, "meta", "config"));
+    if (legacySnap.exists() && legacySnap.data().pin === pin) {
+      const wsData = await migrateLegacyToWorkspace(pin, legacySnap.data());
+      state.workspaceId = pin;
+      state.configDoc = wsData;
+      localStorage.setItem("cl_pin", pin);
+      state.pinOk = true;
+      listenWorkspace(pin);
+      return true;
+    }
+    if (!silent) { state.pendingPin = pin; state.gateStep = "newWorkspace"; }
+    return false;
+  } finally {
+    state.gateBusy = false;
+    if (!silent) render();
+  }
+}
+
+async function submitNewWorkspace(pin, namesCsv) {
+  const names = namesCsv.split(",").map(s => s.trim()).filter(Boolean);
+  if (!names.length) { showToast("Add at least one name"); return; }
+  const wsData = { pin, baseUsers: names, basePeople: names, customStatuses: [], customPeople: [] };
+  state.gateBusy = true; render();
+  await setDoc(doc(db, "workspaces", pin), wsData);
+  state.workspaceId = pin;
+  state.configDoc = wsData;
   localStorage.setItem("cl_pin", pin);
-  state.configDoc = { pin, customStatuses: [], customPeople: [] };
   state.pinOk = true;
+  state.gateBusy = false;
+  listenWorkspace(pin);
   render();
 }
-async function submitPinEntry(pin) {
-  if (state.configDoc && pin === state.configDoc.pin) {
-    localStorage.setItem("cl_pin", pin);
-    state.pinOk = true;
-    render();
-  } else {
-    showToast("Wrong PIN");
+
+// Fully removes a space: every checklist's items + activity, the checklists
+// themselves, and the workspace doc. Cannot be undone.
+async function deleteWorkspace(wsId) {
+  const listsSnap = await getDocs(collection(db, "workspaces", wsId, "checklists"));
+  for (const listDoc of listsSnap.docs) {
+    for (const sub of ["items", "activity"]) {
+      const subSnap = await getDocs(collection(db, "workspaces", wsId, "checklists", listDoc.id, sub));
+      let batch = writeBatch(db); let n = 0;
+      for (const d of subSnap.docs) {
+        batch.delete(d.ref); n++;
+        if (n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; }
+      }
+      if (n > 0) await batch.commit();
+    }
+    await deleteDoc(doc(db, "workspaces", wsId, "checklists", listDoc.id));
   }
+  await deleteDoc(doc(db, "workspaces", wsId));
 }
 
 /* ============================= FIRESTORE: LISTS ============================= */
 let unsubLists = null;
 function listenLists() {
   if (unsubLists) unsubLists();
-  const q = query(collection(db, "checklists"), orderBy("updatedAt", "desc"));
+  const q = query(collection(db, "workspaces", state.workspaceId, "checklists"), orderBy("updatedAt", "desc"));
   unsubLists = onSnapshot(q, snap => {
     state.lists = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     runAutoArchiveCheck(state.lists);
@@ -607,13 +704,13 @@ function runAutoArchiveCheck(lists) {
     const cutoff = eventMs + AUTO_ARCHIVE_DAYS * 24 * 60 * 60 * 1000;
     if (now >= cutoff) {
       autoArchiveChecked.add(l.id);
-      updateDoc(doc(db, "checklists", l.id), { archived: true, updatedAt: serverTimestamp(), updatedBy: "Auto-archive" });
+      updateDoc(doc(db, "workspaces", state.workspaceId, "checklists", l.id), { archived: true, updatedAt: serverTimestamp(), updatedBy: "Auto-archive" });
     }
   });
 }
 
 async function createList(name, eventDate) {
-  const ref = await addDoc(collection(db, "checklists"), {
+  const ref = await addDoc(collection(db, "workspaces", state.workspaceId, "checklists"), {
     name, eventDate: eventDate || null,
     createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
     updatedBy: state.user, archived: false,
@@ -624,15 +721,15 @@ async function createList(name, eventDate) {
 }
 
 async function archiveList(id, archived) {
-  await updateDoc(doc(db, "checklists", id), { archived, updatedAt: serverTimestamp(), updatedBy: state.user });
+  await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists", id), { archived, updatedAt: serverTimestamp(), updatedBy: state.user });
 }
 
 async function duplicateList(srcList) {
   const name = prompt("Name for the new checklist:", "Copy of " + srcList.name);
   if (!name) return;
   const eventDate = prompt("Event date (YYYY-MM-DD), optional:", "") || null;
-  const itemsSnap = await getDocs(collection(db, "checklists", srcList.id, "items"));
-  const newRef = await addDoc(collection(db, "checklists"), {
+  const itemsSnap = await getDocs(collection(db, "workspaces", state.workspaceId, "checklists", srcList.id, "items"));
+  const newRef = await addDoc(collection(db, "workspaces", state.workspaceId, "checklists"), {
     name, eventDate,
     createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
     updatedBy: state.user, archived: false,
@@ -643,7 +740,7 @@ async function duplicateList(srcList) {
   itemsSnap.docs.forEach(d => {
     const data = d.data();
     if (data.archived) return; // skip archived items
-    const newItemRef = doc(collection(db, "checklists", newRef.id, "items"));
+    const newItemRef = doc(collection(db, "workspaces", state.workspaceId, "checklists", newRef.id, "items"));
     batch.set(newItemRef, {
       name: data.name, category: data.category, status: "idea",
       notes: data.notes || "", assignedTo: data.assignedTo || "", packFor: data.packFor || "",
@@ -661,12 +758,12 @@ let unsubCurrent = null, unsubItems = null, unsubActivity = null;
 function listenCurrent(id) {
   if (unsubCurrent) unsubCurrent();
   if (unsubItems) unsubItems();
-  unsubCurrent = onSnapshot(doc(db, "checklists", id), snap => {
+  unsubCurrent = onSnapshot(doc(db, "workspaces", state.workspaceId, "checklists", id), snap => {
     if (!snap.exists()) { state.current = null; render(); return; }
     state.current = { id: snap.id, ...snap.data() };
     render();
   });
-  unsubItems = onSnapshot(collection(db, "checklists", id, "items"), snap => {
+  unsubItems = onSnapshot(collection(db, "workspaces", state.workspaceId, "checklists", id, "items"), snap => {
     state.currentItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
   });
@@ -674,7 +771,7 @@ function listenCurrent(id) {
 
 function listenActivity(listId, limitN) {
   if (unsubActivity) unsubActivity();
-  const q = query(collection(db, "checklists", listId, "activity"), orderBy("createdAt", "desc"), limit(limitN));
+  const q = query(collection(db, "workspaces", state.workspaceId, "checklists", listId, "activity"), orderBy("createdAt", "desc"), limit(limitN));
   unsubActivity = onSnapshot(q, snap => {
     state.activity = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
@@ -682,12 +779,12 @@ function listenActivity(listId, limitN) {
 }
 
 async function touchList(id) {
-  await updateDoc(doc(db, "checklists", id), { updatedAt: serverTimestamp(), updatedBy: state.user });
+  await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists", id), { updatedAt: serverTimestamp(), updatedBy: state.user });
 }
 
 // Fire-and-forget activity log entry. Never blocks or throws into the caller.
 function logActivity(listId, message) {
-  addDoc(collection(db, "checklists", listId, "activity"), {
+  addDoc(collection(db, "workspaces", state.workspaceId, "checklists", listId, "activity"), {
     message, user: state.user, createdAt: serverTimestamp()
   }).catch(() => {});
 }
@@ -727,7 +824,7 @@ async function addItemsBulk(listId, rawText, categoryChoice, statusChoice, assig
     if (!categories.includes(cat)) categories.push(cat);
     const targets = people.length ? people : [null]; // null = no person tag, single item
     targets.forEach(person => {
-      const ref = doc(collection(db, "checklists", listId, "items"));
+      const ref = doc(collection(db, "workspaces", state.workspaceId, "checklists", listId, "items"));
       batch.set(ref, {
         name, category: cat, status: statusChoice || "idea",
         notes: "", assignedTo: assigneeChoice || "", packFor: person || "",
@@ -737,7 +834,7 @@ async function addItemsBulk(listId, rawText, categoryChoice, statusChoice, assig
       count++;
     });
   });
-  batch.update(doc(db, "checklists", listId), { categories, updatedAt: serverTimestamp(), updatedBy: state.user });
+  batch.update(doc(db, "workspaces", state.workspaceId, "checklists", listId), { categories, updatedAt: serverTimestamp(), updatedBy: state.user });
   await batch.commit();
   created.forEach(c => logActivity(listId, `Added ${c.name} to ${c.category}`));
   showToast(`Added ${count} item${count>1?"s":""}`);
@@ -746,7 +843,7 @@ async function addItemsBulk(listId, rawText, categoryChoice, statusChoice, assig
 async function cycleStatus(item) {
   const idx = effStatuses.findIndex(s => s.id === item.status);
   const next = effStatuses[(idx + 1) % effStatuses.length];
-  await updateDoc(doc(db, "checklists", state.current.id, "items", item.id), { status: next.id });
+  await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists", state.current.id, "items", item.id), { status: next.id });
   await touchList(state.current.id);
   applyFilterGrace({ ...item, status: next.id });
   logActivity(state.current.id, `${item.name} \u2192 ${next.label}`);
@@ -754,7 +851,7 @@ async function cycleStatus(item) {
 async function setStatus(itemIds, statusId) {
   const label = (effStatusById[statusId] || {}).label || statusId;
   const batch = writeBatch(db);
-  itemIds.forEach(id => batch.update(doc(db, "checklists", state.current.id, "items", id), { status: statusId }));
+  itemIds.forEach(id => batch.update(doc(db, "workspaces", state.workspaceId, "checklists", state.current.id, "items", id), { status: statusId }));
   await batch.commit();
   await touchList(state.current.id);
   itemIds.forEach(id => {
@@ -773,14 +870,14 @@ async function setCategoryBulk(itemIds, category) {
   let categories = [...(list.categories || [])];
   if (!categories.includes(category)) categories.push(category);
   const batch = writeBatch(db);
-  itemIds.forEach(id => batch.update(doc(db, "checklists", state.current.id, "items", id), { category }));
-  batch.update(doc(db, "checklists", list.id), { categories, updatedAt: serverTimestamp(), updatedBy: state.user });
+  itemIds.forEach(id => batch.update(doc(db, "workspaces", state.workspaceId, "checklists", state.current.id, "items", id), { category }));
+  batch.update(doc(db, "workspaces", state.workspaceId, "checklists", list.id), { categories, updatedAt: serverTimestamp(), updatedBy: state.user });
   await batch.commit();
   logActivity(list.id, `Moved ${itemIds.length} item${itemIds.length>1?"s":""} to ${category}`);
 }
 async function setAssigneeBulk(itemIds, assignedTo) {
   const batch = writeBatch(db);
-  itemIds.forEach(id => batch.update(doc(db, "checklists", state.current.id, "items", id), { assignedTo }));
+  itemIds.forEach(id => batch.update(doc(db, "workspaces", state.workspaceId, "checklists", state.current.id, "items", id), { assignedTo }));
   await batch.commit();
   await touchList(state.current.id);
   itemIds.forEach(id => {
@@ -791,7 +888,7 @@ async function setAssigneeBulk(itemIds, assignedTo) {
 }
 async function archiveItems(itemIds, archived) {
   const batch = writeBatch(db);
-  itemIds.forEach(id => batch.update(doc(db, "checklists", state.current.id, "items", id), { archived }));
+  itemIds.forEach(id => batch.update(doc(db, "workspaces", state.workspaceId, "checklists", state.current.id, "items", id), { archived }));
   await batch.commit();
   await touchList(state.current.id);
   logActivity(state.current.id, `${archived ? "Archived" : "Restored"} ${itemIds.length} item${itemIds.length>1?"s":""}`);
@@ -803,8 +900,8 @@ async function renameCategory(oldName, newName) {
   const categories = (list.categories || []).map(c => c === oldName ? newName : c);
   const affected = state.currentItems.filter(it => it.category === oldName);
   const batch = writeBatch(db);
-  affected.forEach(it => batch.update(doc(db, "checklists", list.id, "items", it.id), { category: newName }));
-  batch.update(doc(db, "checklists", list.id), { categories, updatedAt: serverTimestamp(), updatedBy: state.user });
+  affected.forEach(it => batch.update(doc(db, "workspaces", state.workspaceId, "checklists", list.id, "items", it.id), { category: newName }));
+  batch.update(doc(db, "workspaces", state.workspaceId, "checklists", list.id), { categories, updatedAt: serverTimestamp(), updatedBy: state.user });
   await batch.commit();
   logActivity(list.id, `Renamed category "${oldName}" to "${newName}"`);
 }
@@ -815,9 +912,9 @@ async function deleteCategory(name) {
   const deletedCategories = [...(list.deletedCategories || []), name];
   const affected = state.currentItems.filter(it => it.category === name);
   const batch = writeBatch(db);
-  affected.forEach(it => batch.update(doc(db, "checklists", list.id, "items", it.id), { category: "Uncategorized" }));
+  affected.forEach(it => batch.update(doc(db, "workspaces", state.workspaceId, "checklists", list.id, "items", it.id), { category: "Uncategorized" }));
   if (!categories.includes("Uncategorized") && affected.length) categories.push("Uncategorized");
-  batch.update(doc(db, "checklists", list.id), { categories, deletedCategories, updatedAt: serverTimestamp(), updatedBy: state.user });
+  batch.update(doc(db, "workspaces", state.workspaceId, "checklists", list.id), { categories, deletedCategories, updatedAt: serverTimestamp(), updatedBy: state.user });
   await batch.commit();
   logActivity(list.id, `Deleted category "${name}"`);
 }
@@ -833,23 +930,41 @@ function render() {
 }
 
 function renderPinGate() {
-  const needsSetup = state.configDoc === null;
+  if (state.gateStep === "newWorkspace") return renderNewWorkspaceGate();
   appEl.innerHTML = `
     <div class="gate-wrap"><div class="gate-card">
-      <h2>${needsSetup ? "Set a PIN" : "Enter PIN"}</h2>
-      <p class="muted">${needsSetup ? "This creates the shared PIN for you and David." : "Enter the shared PIN to continue."}</p>
+      <h2>Enter your space's PIN</h2>
+      <p class="muted">Each household/group has its own PIN. If yours doesn't exist yet, you'll be able to create it.</p>
       <div class="field"><input type="password" id="pinInput" inputmode="numeric" placeholder="PIN" autofocus /></div>
-      <button class="primary" id="pinSubmit" style="width:100%">Continue</button>
+      <button class="primary" id="pinSubmit" style="width:100%" ${state.gateBusy?"disabled":""}>${state.gateBusy?"Checking\u2026":"Continue"}</button>
     </div></div>
   `;
   document.getElementById("pinSubmit").onclick = () => {
     const val = document.getElementById("pinInput").value.trim();
     if (!val) return;
-    needsSetup ? submitPinSetup(val) : submitPinEntry(val);
+    attemptLogin(val, false);
   };
   document.getElementById("pinInput").addEventListener("keydown", e => {
     if (e.key === "Enter") document.getElementById("pinSubmit").click();
   });
+}
+
+function renderNewWorkspaceGate() {
+  appEl.innerHTML = `
+    <div class="gate-wrap"><div class="gate-card">
+      <h2>Create your space</h2>
+      <p class="muted">No space found for that PIN yet. Name the people in your household/group to set one up \u2014 you can add more later.</p>
+      <div class="field"><input type="text" id="wsNames" placeholder="e.g. Alex, Sam, Jamie" autofocus /></div>
+      <button class="primary" id="wsCreate" style="width:100%" ${state.gateBusy?"disabled":""}>${state.gateBusy?"Creating\u2026":"Create space"}</button>
+      <button class="ghost" id="wsBack" style="width:100%;margin-top:0.4rem;">\u2190 Use a different PIN</button>
+    </div></div>
+  `;
+  document.getElementById("wsCreate").onclick = () => {
+    const names = document.getElementById("wsNames").value.trim();
+    if (!names) return;
+    submitNewWorkspace(state.pendingPin, names);
+  };
+  document.getElementById("wsBack").onclick = () => { state.gateStep = "enterPin"; state.pendingPin = null; render(); };
 }
 
 function renderUserGate() {
@@ -857,7 +972,7 @@ function renderUserGate() {
     <div class="gate-wrap"><div class="gate-card">
       <h2>Who are you?</h2>
       <div class="who-grid">
-        ${DEFAULT_USERS.map(u => `<button class="who-btn" data-user="${u}">${u}</button>`).join("")}
+        ${baseUsers().map(u => `<button class="who-btn" data-user="${u}">${u}</button>`).join("")}
       </div>
       <p class="muted">Someone else?</p>
       <div class="field row-gap">
@@ -872,7 +987,11 @@ function renderUserGate() {
   document.getElementById("otherUserGo").onclick = () => {
     const v = document.getElementById("otherUser").value.trim();
     if (!v) return;
-    state.user = v; localStorage.setItem("cl_user", v); bootAfterAuth();
+    state.user = v; localStorage.setItem("cl_user", v);
+    if (state.workspaceId && !baseUsers().includes(v)) {
+      updateDoc(doc(db, "workspaces", state.workspaceId), { baseUsers: [...baseUsers(), v] }).catch(() => {});
+    }
+    bootAfterAuth();
   };
 }
 
@@ -889,6 +1008,8 @@ function renderOverview() {
           ${state.overviewMoreMenuOpen ? `
             <div class="more-menu" id="ovMoreMenu">
               <button id="ovThemeToggle">${state.theme === "dark" ? "\u2600\uFE0F Light mode" : "\u{1F319} Dark mode"}</button>
+              <button id="ovSwitchSpace">\u{1F6AA} Switch space</button>
+              <button id="ovDeleteSpace" class="danger">\u{1F5D1}\uFE0F Delete this space</button>
             </div>` : ""}
         </div>
       </div>
@@ -910,6 +1031,30 @@ function renderOverview() {
   if (state.overviewMoreMenuOpen) {
     document.getElementById("ovMoreMenuWrap").addEventListener("click", e => e.stopPropagation());
     document.getElementById("ovThemeToggle").onclick = () => { state.overviewMoreMenuOpen = false; toggleTheme(); };
+    document.getElementById("ovSwitchSpace").onclick = () => {
+      if (unsubConfig) { unsubConfig(); unsubConfig = null; }
+      if (unsubLists) { unsubLists(); unsubLists = null; }
+      localStorage.removeItem("cl_pin");
+      state.pinOk = false; state.workspaceId = null; state.configDoc = null;
+      state.user = null; localStorage.removeItem("cl_user");
+      state.overviewMoreMenuOpen = false;
+      render();
+    };
+    document.getElementById("ovDeleteSpace").onclick = async () => {
+      state.overviewMoreMenuOpen = false;
+      render();
+      const wsId = state.workspaceId;
+      const typed = prompt(`This permanently deletes every checklist in this space \u2014 there's no undo. Type this space's PIN (${wsId}) to confirm:`);
+      if (typed !== wsId) { if (typed !== null) showToast("PIN didn't match \u2014 nothing deleted"); return; }
+      showToast("Deleting space\u2026");
+      if (unsubConfig) { unsubConfig(); unsubConfig = null; }
+      if (unsubLists) { unsubLists(); unsubLists = null; }
+      await deleteWorkspace(wsId);
+      localStorage.removeItem("cl_pin");
+      state.pinOk = false; state.workspaceId = null; state.configDoc = null;
+      state.user = null; localStorage.removeItem("cl_user");
+      render();
+    };
     setTimeout(() => document.addEventListener("click", () => { if (state.overviewMoreMenuOpen) { state.overviewMoreMenuOpen = false; render(); } }, { once: true }), 0);
   }
   document.getElementById("viewActive").onclick = () => { state.overviewView = "active"; render(); };
@@ -1123,12 +1268,12 @@ function renderListDetail() {
           </details>
           <details class="filters-more" id="assigneeDetails" ${state.assigneeDetailsOpen ? "open" : ""}>
             <summary>Assigned to${(() => {
-              const activeLabels = DEFAULT_USERS.filter(u => state.assigneeFilter.has(u));
+              const activeLabels = baseUsers().filter(u => state.assigneeFilter.has(u));
               if (state.assigneeFilter.has("__unassigned__")) activeLabels.push("Unassigned");
               return activeLabels.length ? `: ${activeLabels.join(", ")}` : "";
             })()}</summary>
             <div class="status-filter-row">
-              ${DEFAULT_USERS.map(u => {
+              ${baseUsers().map(u => {
                 const count = items.filter(it => it.assignedTo === u).length;
                 const active = state.assigneeFilter.has(u);
                 return `<button class="status-pill ${active?"active":""}" data-assignee-filter="${escapeHtml(u)}" style="--pill-color:var(--focus)">\u{1F464} ${escapeHtml(u)} <span class="pill-count">${count}</span></button>`;
@@ -1193,9 +1338,14 @@ function renderListDetail() {
     <div class="category-grid">
       ${categoryGroups.map(g => renderCategoryBlock(g.cat, g.displayItems, g.totalCount, g.totalRemaining, g.filteredRemaining, filtersActive)).join("")}
     </div>
-    <div style="height:4.5rem;"></div>
+    <div style="height:${state.selected.size ? "9rem" : "4.5rem"};"></div>
     </div>
     ${state.selected.size ? "" : `
+      ${(!state.fabOpen && !localStorage.getItem("cl_fab_intro_seen")) ? `
+        <div class="fab-intro" id="fabIntro">
+          That waffle button is quick actions \u2014 tap it to see options, or press and drag to pick one without letting go.
+          <button id="fabIntroDismiss">Got it</button>
+        </div>` : ""}
       <div class="fab-wrap">
         <div class="speed-actions ${state.fabOpen ? "open" : ""}" id="speedActions">
           <button class="speed-action" data-fab-action="jumpCategory"><span class="sa-icon">\u{1F4C2}</span>Jump to category</button>
@@ -1211,14 +1361,15 @@ function renderListDetail() {
     ${state.toast ? `<div class="toast">${state.toast}</div>` : ""}
   `;
 
-  // header interactions
+  // header interactions - wrapped so a failure here can never block item wiring below
+  try {
   const nameEl = document.getElementById("listName");
   nameEl.addEventListener("blur", async () => {
     const v = nameEl.textContent.trim();
-    if (v && v !== list.name) await updateDoc(doc(db,"checklists",list.id), { name: v, updatedAt: serverTimestamp(), updatedBy: state.user });
+    if (v && v !== list.name) await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists",list.id), { name: v, updatedAt: serverTimestamp(), updatedBy: state.user });
   });
   document.getElementById("eventDateInput").addEventListener("change", async e => {
-    await updateDoc(doc(db,"checklists",list.id), { eventDate: e.target.value || null, updatedAt: serverTimestamp(), updatedBy: state.user });
+    await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists",list.id), { eventDate: e.target.value || null, updatedAt: serverTimestamp(), updatedBy: state.user });
   });
   document.getElementById("moreMenuBtn").onclick = (e) => { e.stopPropagation(); state.moreMenuOpen = !state.moreMenuOpen; render(); };
   if (state.moreMenuOpen) {
@@ -1302,7 +1453,7 @@ function renderListDetail() {
   if (retroNotesEl) {
     retroNotesEl.addEventListener("blur", async () => {
       const v = retroNotesEl.value.trim();
-      if (v !== (list.retroNotes||"")) await updateDoc(doc(db,"checklists",list.id), { retroNotes: v });
+      if (v !== (list.retroNotes||"")) await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists",list.id), { retroNotes: v });
     });
   }
   function triggerFabAction(actionId) {
@@ -1320,10 +1471,16 @@ function renderListDetail() {
       render();
     }
   }
+  function dismissFabIntro() {
+    if (!localStorage.getItem("cl_fab_intro_seen")) localStorage.setItem("cl_fab_intro_seen", "1");
+  }
+  const fabIntroDismissBtn = document.getElementById("fabIntroDismiss");
+  if (fabIntroDismissBtn) fabIntroDismissBtn.onclick = () => { dismissFabIntro(); render(); };
   const mainFab = document.getElementById("mainFab");
   if (mainFab) {
     let fabHoldTimer = null, fabLongPressed = false;
     mainFab.addEventListener("pointerdown", () => {
+      dismissFabIntro();
       fabLongPressed = false;
       fabHoldTimer = setTimeout(() => {
         fabLongPressed = true;
@@ -1370,9 +1527,15 @@ function renderListDetail() {
       render();
     };
   });
+  } catch (err) {
+    console.error("Header/filter/FAB wiring failed (item wiring below still runs):", err);
+  }
 
-  // per-item wiring
-  items.forEach(it => wireItemRow(it, categories));
+  // per-item wiring - each item isolated so one bad item can't block the rest
+  items.forEach(it => {
+    try { wireItemRow(it, categories); }
+    catch (err) { console.error("Item wiring failed for", it.id, err); }
+  });
   // category head + per-category menu wiring
   categoryGroups.forEach(g => {
     const cat = g.cat;
@@ -1417,6 +1580,7 @@ function renderListDetail() {
 }
 
 function renderCategoryBlock(cat, items, totalCount, totalRemaining, filteredRemaining, filtersActive) {
+  if (filtersActive && items.length === 0) return "";
   const count = totalCount !== undefined ? totalCount : items.length;
   const remaining = totalRemaining !== undefined ? totalRemaining : items.filter(it => it.status !== "packed").length;
   const remainingShown = filteredRemaining !== undefined ? filteredRemaining : remaining;
@@ -1484,7 +1648,7 @@ function renderBulkBar() {
       </select>
       <select id="bulkAssignSel">
         <option value="">Assign to\u2026</option>
-        ${DEFAULT_USERS.map(u => `<option value="${u}">\u{1F464} ${u}</option>`).join("")}
+        ${baseUsers().map(u => `<option value="${u}">\u{1F464} ${u}</option>`).join("")}
         <option value="__none__">\u2014 Unassign</option>
       </select>
       <button id="bulkArchive">Archive</button>
@@ -1518,19 +1682,27 @@ function wireItemRow(it, categories) {
   };
   chip.addEventListener("pointerdown", e => {
     longPressed = false;
-    holdTimer = setTimeout(() => { longPressed = true; openMenu(e.clientX, e.clientY); }, 480);
+    holdTimer = setTimeout(() => {
+      longPressed = true;
+      try { openMenu(e.clientX, e.clientY); } catch (err) { console.error("openMenu failed:", err); }
+    }, 480);
   });
   chip.addEventListener("pointerup", () => {
     clearTimeout(holdTimer);
-    if (!longPressed) cycleStatus(it);
+    if (!longPressed) {
+      cycleStatus(it).catch(err => console.error("cycleStatus failed:", err));
+    }
   });
   chip.addEventListener("pointerleave", () => clearTimeout(holdTimer));
   row.addEventListener("dblclick", (e) => {
     if (e.target.closest("[data-select]") || e.target.closest(".status-chip") || e.target.closest(".edit-pencil")) return;
-    openItemEditModal(it, categories);
+    try { openItemEditModal(it, categories); } catch (err) { console.error("openItemEditModal failed:", err); }
   });
   const editBtn = row.querySelector("[data-edit]");
-  if (editBtn) editBtn.addEventListener("click", e => { e.stopPropagation(); openItemEditModal(it, categories); });
+  if (editBtn) editBtn.addEventListener("click", e => {
+    e.stopPropagation();
+    try { openItemEditModal(it, categories); } catch (err) { console.error("openItemEditModal failed:", err); }
+  });
 }
 function closeAnyMenu() { document.querySelectorAll(".status-menu").forEach(m => m.remove()); }
 
@@ -1648,7 +1820,7 @@ function openBulkInsertModal(categories, peopleList, presetCategory) {
     <div class="field"><label>Assign to (optional)</label>
       <select id="biAssign">
         <option value="">Unassigned</option>
-        ${DEFAULT_USERS.map(u => `<option value="${u}">\u{1F464} ${u}</option>`).join("")}
+        ${baseUsers().map(u => `<option value="${u}">\u{1F464} ${u}</option>`).join("")}
       </select>
     </div>
     <div class="modal-actions"><button id="biCancel">Cancel</button><button class="primary" id="biAdd">Add items</button></div>
@@ -1714,7 +1886,7 @@ function openItemEditModal(it, categories) {
     <div class="field">
       <label>\u{1F464} Assigned to (who's responsible, optional)</label>
       <div class="chip-select-row" id="ieAssignedChips">
-        ${DEFAULT_USERS.map(u => `<button type="button" class="chip-select ${u===selectedAssignee?"active":""}" data-assignee="${escapeHtml(u)}">${escapeHtml(u)}</button>`).join("")}
+        ${baseUsers().map(u => `<button type="button" class="chip-select ${u===selectedAssignee?"active":""}" data-assignee="${escapeHtml(u)}">${escapeHtml(u)}</button>`).join("")}
       </div>
     </div>
     <div class="field">
@@ -1761,7 +1933,7 @@ function openItemEditModal(it, categories) {
       const name = wrap.querySelector("#ieName").value.trim() || it.name;
       const category = catSel.value === "__new__" ? (it.category || "Uncategorized") : catSel.value;
       const notes = wrap.querySelector("#ieNotes").value.trim();
-      await addDoc(collection(db, "checklists", state.current.id, "items"), {
+      await addDoc(collection(db, "workspaces", state.workspaceId, "checklists", state.current.id, "items"), {
         name, category, status: "idea",
         notes, assignedTo: "", packFor: person,
         archived: false, createdAt: serverTimestamp()
@@ -1772,7 +1944,7 @@ function openItemEditModal(it, categories) {
   });
   wrap.querySelector("#ieCancel").onclick = () => wrap.remove();
   wrap.querySelector("#ieDelete").onclick = async () => {
-    await updateDoc(doc(db, "checklists", state.current.id, "items", it.id), { archived: true });
+    await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists", state.current.id, "items", it.id), { archived: true });
     logActivity(state.current.id, `Archived ${it.name}`);
     wrap.remove();
   };
@@ -1786,10 +1958,10 @@ function openItemEditModal(it, categories) {
       const cats = [...(list.categories || [])];
       if (!cats.includes(category)) {
         cats.push(category);
-        await updateDoc(doc(db, "checklists", list.id), { categories: cats });
+        await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists", list.id), { categories: cats });
       }
     }
-    await updateDoc(doc(db, "checklists", state.current.id, "items", it.id), { name, notes, category, packFor: selectedPackFor, assignedTo: selectedAssignee });
+    await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists", state.current.id, "items", it.id), { name, notes, category, packFor: selectedPackFor, assignedTo: selectedAssignee });
     applyFilterGrace({ ...it, name, notes, category, packFor: selectedPackFor, assignedTo: selectedAssignee });
     logActivity(state.current.id, `Edited ${name}`);
     wrap.remove();
@@ -1800,40 +1972,40 @@ async function upsertCustomStatus(scope, list, entry) {
   if (scope === "global") {
     const arr = ((state.configDoc && state.configDoc.customStatuses) || []).filter(c => c.id !== entry.id);
     arr.push(entry);
-    await updateDoc(doc(db, "meta", "config"), { customStatuses: arr });
+    await updateDoc(doc(db, "workspaces", state.workspaceId), { customStatuses: arr });
   } else {
     const arr = (list.customStatuses || []).filter(c => c.id !== entry.id);
     arr.push(entry);
-    await updateDoc(doc(db, "checklists", list.id), { customStatuses: arr });
+    await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists", list.id), { customStatuses: arr });
   }
 }
 async function removeCustomStatus(scope, list, id) {
   if (scope === "global") {
     const arr = ((state.configDoc && state.configDoc.customStatuses) || []).filter(c => c.id !== id);
-    await updateDoc(doc(db, "meta", "config"), { customStatuses: arr });
+    await updateDoc(doc(db, "workspaces", state.workspaceId), { customStatuses: arr });
   } else {
     const arr = (list.customStatuses || []).filter(c => c.id !== id);
-    await updateDoc(doc(db, "checklists", list.id), { customStatuses: arr });
+    await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists", list.id), { customStatuses: arr });
   }
 }
 async function upsertCustomPerson(scope, list, entry) {
   if (scope === "global") {
     const arr = ((state.configDoc && state.configDoc.customPeople) || []).filter(p => p.id !== entry.id);
     arr.push(entry);
-    await updateDoc(doc(db, "meta", "config"), { customPeople: arr });
+    await updateDoc(doc(db, "workspaces", state.workspaceId), { customPeople: arr });
   } else {
     const arr = (list.customPeople || []).filter(p => p.id !== entry.id);
     arr.push(entry);
-    await updateDoc(doc(db, "checklists", list.id), { customPeople: arr });
+    await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists", list.id), { customPeople: arr });
   }
 }
 async function removeCustomPerson(scope, list, id) {
   if (scope === "global") {
     const arr = ((state.configDoc && state.configDoc.customPeople) || []).filter(p => p.id !== id);
-    await updateDoc(doc(db, "meta", "config"), { customPeople: arr });
+    await updateDoc(doc(db, "workspaces", state.workspaceId), { customPeople: arr });
   } else {
     const arr = (list.customPeople || []).filter(p => p.id !== id);
-    await updateDoc(doc(db, "checklists", list.id), { customPeople: arr });
+    await updateDoc(doc(db, "workspaces", state.workspaceId, "checklists", list.id), { customPeople: arr });
   }
 }
 
@@ -1959,10 +2131,15 @@ function mountRoute() {
   }
 }
 
-initConfigListener().then(() => {
+async function boot() {
+  const savedPin = localStorage.getItem("cl_pin");
+  if (savedPin) {
+    await attemptLogin(savedPin, true);
+  }
   render();
   if (state.pinOk && state.user) mountRoute();
-});
+}
+boot();
 </script>
 </body>
 </html>
