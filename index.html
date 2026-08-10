@@ -169,14 +169,14 @@
     border-top: 1px solid var(--border);
   }
   .item-row.archived { opacity: 0.55; }
-  .item-row input[type=checkbox] { width: 1.2em; height: 1.2em; flex-shrink: 0; }
+  .item-row input[type=checkbox] { width: 1.2em; height: 1.2em; flex-shrink: 0; margin: 0.5em; }
   .item-main { flex: 1; min-width: 0; }
   .item-name { font-weight: 600; word-break: break-word; }
-  .edit-pencil-inline {
-    background: transparent; border: none; padding: 0 0.25em; font-size: 0.68em; opacity: 0.35;
-    vertical-align: middle; line-height: 1;
+  .edit-pencil {
+    background: transparent; border: none; padding: 0.15em 0.3em; font-size: 0.75em; opacity: 0.4;
+    flex-shrink: 0;
   }
-  .edit-pencil-inline:active { opacity: 0.75; }
+  .edit-pencil:active { opacity: 0.8; }
   .item-sub { font-size: 0.78rem; color: var(--text-dim); display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .status-chip {
     border: none; border-radius: 999px; padding: 0.35em 0.7em; font-size: 0.8rem; font-weight: 700;
@@ -435,6 +435,8 @@ let state = {
   assigneeFilter: new Set(),
   packForFilter: new Set(),
   packForDetailsOpen: false,
+  statusDetailsOpen: false,
+  assigneeDetailsOpen: false,
   textFilter: "",
   collapsedCategories: new Set(),
   toast: null,
@@ -648,7 +650,7 @@ function parseLinePeople(line, effPeople) {
   return { name: cleaned, people };
 }
 
-async function addItemsBulk(listId, rawText, categoryChoice, statusChoice) {
+async function addItemsBulk(listId, rawText, categoryChoice, statusChoice, assigneeChoice) {
   const rawLines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
   if (!rawLines.length) return;
   const list = state.current;
@@ -667,7 +669,7 @@ async function addItemsBulk(listId, rawText, categoryChoice, statusChoice) {
       const ref = doc(collection(db, "checklists", listId, "items"));
       batch.set(ref, {
         name, category: cat, status: statusChoice || "idea",
-        notes: "", assignedTo: "", packFor: person || "",
+        notes: "", assignedTo: assigneeChoice || "", packFor: person || "",
         archived: false, createdAt: serverTimestamp()
       });
       count++;
@@ -683,12 +685,17 @@ async function cycleStatus(item) {
   const next = effStatuses[(idx + 1) % effStatuses.length];
   await updateDoc(doc(db, "checklists", state.current.id, "items", item.id), { status: next.id });
   await touchList(state.current.id);
+  applyFilterGrace({ ...item, status: next.id });
 }
 async function setStatus(itemIds, statusId) {
   const batch = writeBatch(db);
   itemIds.forEach(id => batch.update(doc(db, "checklists", state.current.id, "items", id), { status: statusId }));
   await batch.commit();
   await touchList(state.current.id);
+  itemIds.forEach(id => {
+    const found = state.currentItems.find(it => it.id === id);
+    if (found) applyFilterGrace({ ...found, status: statusId });
+  });
 }
 async function setCategoryBulk(itemIds, category) {
   const list = state.current;
@@ -704,6 +711,10 @@ async function setAssigneeBulk(itemIds, assignedTo) {
   itemIds.forEach(id => batch.update(doc(db, "checklists", state.current.id, "items", id), { assignedTo }));
   await batch.commit();
   await touchList(state.current.id);
+  itemIds.forEach(id => {
+    const found = state.currentItems.find(it => it.id === id);
+    if (found) applyFilterGrace({ ...found, assignedTo });
+  });
 }
 async function archiveItems(itemIds, archived) {
   const batch = writeBatch(db);
@@ -796,14 +807,14 @@ function renderOverview() {
     <header class="top">
       <h1>\u{1F9F3} Travid Checklists</h1>
       <div class="row-gap">
-        <div class="more-menu-wrap">
+        <div class="user-badge"><div class="avatar">${initials(state.user)}</div> ${state.user} <button class="ghost" id="switchUser" style="padding:0.2em 0.5em;font-size:0.8rem;">switch</button></div>
+        <div class="more-menu-wrap" id="ovMoreMenuWrap">
           <button id="ovMoreBtn">\u22EF</button>
           ${state.overviewMoreMenuOpen ? `
             <div class="more-menu" id="ovMoreMenu">
               <button id="ovThemeToggle">${state.theme === "dark" ? "\u2600\uFE0F Light mode" : "\u{1F319} Dark mode"}</button>
             </div>` : ""}
         </div>
-        <div class="user-badge"><div class="avatar">${initials(state.user)}</div> ${state.user} <button class="ghost" id="switchUser" style="padding:0.2em 0.5em;font-size:0.8rem;">switch</button></div>
       </div>
     </header>
     <div class="toolbar">
@@ -821,6 +832,7 @@ function renderOverview() {
   document.getElementById("switchUser").onclick = () => { state.user = null; localStorage.removeItem("cl_user"); render(); };
   document.getElementById("ovMoreBtn").onclick = (e) => { e.stopPropagation(); state.overviewMoreMenuOpen = !state.overviewMoreMenuOpen; render(); };
   if (state.overviewMoreMenuOpen) {
+    document.getElementById("ovMoreMenuWrap").addEventListener("click", e => e.stopPropagation());
     document.getElementById("ovThemeToggle").onclick = () => { state.overviewMoreMenuOpen = false; toggleTheme(); };
     setTimeout(() => document.addEventListener("click", () => { if (state.overviewMoreMenuOpen) { state.overviewMoreMenuOpen = false; render(); } }, { once: true }), 0);
   }
@@ -887,6 +899,7 @@ function sortItems(items, primary, secondary) {
 }
 
 function passesFilters(it) {
+  if (filterGraceIds.has(it.id)) return true;
   if (state.statusFilter.size && !state.statusFilter.has(it.status)) return false;
   if (state.assigneeFilter.size) {
     const matchesAssignee = it.assignedTo ? state.assigneeFilter.has(it.assignedTo) : state.assigneeFilter.has("__unassigned__");
@@ -904,6 +917,30 @@ function passesFilters(it) {
   return true;
 }
 
+// When an active filter would make an item disappear, keep it visible for a
+// grace period (in case the change was accidental) before it actually filters out.
+const FILTER_GRACE_MS = 5000;
+const filterGraceIds = new Map(); // itemId -> timeoutId
+function applyFilterGrace(updatedItem) {
+  if (!(state.statusFilter.size || state.assigneeFilter.size || state.packForFilter.size)) return;
+  const wouldStillShow = (() => {
+    if (state.statusFilter.size && !state.statusFilter.has(updatedItem.status)) return false;
+    if (state.assigneeFilter.size) {
+      const m = updatedItem.assignedTo ? state.assigneeFilter.has(updatedItem.assignedTo) : state.assigneeFilter.has("__unassigned__");
+      if (!m) return false;
+    }
+    if (state.packForFilter.size) {
+      const m = updatedItem.packFor ? state.packForFilter.has(updatedItem.packFor) : state.packForFilter.has("__unassigned__");
+      if (!m) return false;
+    }
+    return true;
+  })();
+  if (wouldStillShow) return;
+  if (filterGraceIds.has(updatedItem.id)) clearTimeout(filterGraceIds.get(updatedItem.id));
+  const timeoutId = setTimeout(() => { filterGraceIds.delete(updatedItem.id); render(); }, FILTER_GRACE_MS);
+  filterGraceIds.set(updatedItem.id, timeoutId);
+}
+
 function renderListDetail() {
   const list = state.current;
   if (!list) { appEl.innerHTML = `<div class="app-shell"><p>Loading\u2026</p></div>`; return; }
@@ -913,6 +950,7 @@ function renderListDetail() {
   const categories = [...(list.categories || [])];
   // include any stray categories present on items but not listed
   items.forEach(it => { if (it.category && !categories.includes(it.category)) categories.push(it.category); });
+  categories.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
 
   const total = state.currentItems.filter(it => !it.archived).length;
   const packed = state.currentItems.filter(it => !it.archived && it.status === "packed").length;
@@ -989,8 +1027,11 @@ function renderListDetail() {
         </div>
 
         <div class="lh-filters">
-          <div>
-            <div class="filter-label">Status</div>
+          <details class="filters-more" id="statusDetails" ${state.statusDetailsOpen ? "open" : ""}>
+            <summary>Status${(() => {
+              const activeLabels = effStatuses.filter(s => state.statusFilter.has(s.id)).map(s => s.label);
+              return activeLabels.length ? `: ${activeLabels.join(", ")}` : "";
+            })()}</summary>
             <div class="status-filter-row">
               ${effStatuses.map(s => {
                 const count = items.filter(it => it.status === s.id).length;
@@ -998,9 +1039,13 @@ function renderListDetail() {
                 return `<button class="status-pill ${active?"active":""}" data-status-filter="${s.id}" style="--pill-color:${s.color}">${s.icon} ${s.label} <span class="pill-count">${count}</span></button>`;
               }).join("")}
             </div>
-          </div>
-          <div>
-            <div class="filter-label">Assigned to</div>
+          </details>
+          <details class="filters-more" id="assigneeDetails" ${state.assigneeDetailsOpen ? "open" : ""}>
+            <summary>Assigned to${(() => {
+              const activeLabels = DEFAULT_USERS.filter(u => state.assigneeFilter.has(u));
+              if (state.assigneeFilter.has("__unassigned__")) activeLabels.push("Unassigned");
+              return activeLabels.length ? `: ${activeLabels.join(", ")}` : "";
+            })()}</summary>
             <div class="status-filter-row">
               ${DEFAULT_USERS.map(u => {
                 const count = items.filter(it => it.assignedTo === u).length;
@@ -1013,9 +1058,14 @@ function renderListDetail() {
                 return `<button class="status-pill ${active?"active":""}" data-assignee-filter="__unassigned__" style="--pill-color:var(--text-dim)">Unassigned <span class="pill-count">${count}</span></button>`;
               })()}
             </div>
-          </div>
+          </details>
           <details class="filters-more" id="packForDetails" ${state.packForDetailsOpen ? "open" : ""}>
-            <summary>Packing for</summary>
+            <summary>Packing for${(() => {
+              const effPeople = computeEffectivePeople(list, state.configDoc);
+              const activeLabels = effPeople.filter(p => state.packForFilter.has(p));
+              if (state.packForFilter.has("__unassigned__")) activeLabels.push("None");
+              return activeLabels.length ? `: ${activeLabels.join(", ")}` : "";
+            })()}</summary>
             <div class="status-filter-row">
               ${computeEffectivePeople(list, state.configDoc).map(p => {
                 const count = items.filter(it => it.packFor === p).length;
@@ -1116,6 +1166,10 @@ function renderListDetail() {
       render();
     };
   });
+  const statusDetails = document.getElementById("statusDetails");
+  if (statusDetails) statusDetails.addEventListener("toggle", () => { state.statusDetailsOpen = statusDetails.open; });
+  const assigneeDetails = document.getElementById("assigneeDetails");
+  if (assigneeDetails) assigneeDetails.addEventListener("toggle", () => { state.assigneeDetailsOpen = assigneeDetails.open; });
   const packForDetails = document.getElementById("packForDetails");
   if (packForDetails) packForDetails.addEventListener("toggle", () => { state.packForDetailsOpen = packForDetails.open; });
   const clearAllFiltersBtn = document.getElementById("clearAllFilters");
@@ -1138,7 +1192,7 @@ function renderListDetail() {
   });
 
   // per-item wiring
-  items.forEach(wireItemRow);
+  items.forEach(it => wireItemRow(it, categories));
   // category head + per-category menu wiring
   categoryGroups.forEach(g => {
     const cat = g.cat;
@@ -1214,7 +1268,7 @@ function renderItemRow(it) {
     <div class="item-row ${it.archived?"archived":""}" data-id="${it.id}">
       <input type="checkbox" data-select="${it.id}" ${state.selected.has(it.id)?"checked":""} />
       <div class="item-main">
-        <div class="item-name">${escapeHtml(it.name)}<button class="edit-pencil-inline" data-edit="${it.id}" title="Edit item">\u270F\uFE0F</button></div>
+        <div class="item-name">${escapeHtml(it.name)}</div>
         <div class="item-sub">
           ${it.packFor ? `<span class="tag-pack">\u{1F3F7}\uFE0F ${escapeHtml(it.packFor)}</span>` : ""}
           ${it.assignedTo ? `\u{1F464} ${escapeHtml(it.assignedTo)}` : ""}
@@ -1222,6 +1276,7 @@ function renderItemRow(it) {
         </div>
       </div>
       <button class="status-chip" data-status-toggle="${it.id}" style="background:${s.color}">${s.icon} ${s.label}</button>
+      <button class="edit-pencil" data-edit="${it.id}" title="Edit item">\u270F\uFE0F</button>
     </div>
   `;
 }
@@ -1248,7 +1303,7 @@ function renderBulkBar() {
   `;
 }
 
-function wireItemRow(it) {
+function wireItemRow(it, categories) {
   const row = appEl.querySelector(`.item-row[data-id="${it.id}"]`);
   if (!row) return;
   row.querySelector("[data-select]").addEventListener("change", e => {
@@ -1280,9 +1335,12 @@ function wireItemRow(it) {
     if (!longPressed) cycleStatus(it);
   });
   chip.addEventListener("pointerleave", () => clearTimeout(holdTimer));
-  row.addEventListener("dblclick", () => openItemEditModal(it));
+  row.addEventListener("dblclick", (e) => {
+    if (e.target.closest("[data-select]") || e.target.closest(".status-chip") || e.target.closest(".edit-pencil")) return;
+    openItemEditModal(it, categories);
+  });
   const editBtn = row.querySelector("[data-edit]");
-  if (editBtn) editBtn.addEventListener("click", e => { e.stopPropagation(); openItemEditModal(it); });
+  if (editBtn) editBtn.addEventListener("click", e => { e.stopPropagation(); openItemEditModal(it, categories); });
 }
 function closeAnyMenu() { document.querySelectorAll(".status-menu").forEach(m => m.remove()); }
 
@@ -1375,6 +1433,12 @@ function openBulkInsertModal(categories, peopleList) {
         ${effStatuses.map(s => `<option value="${s.id}" ${s.id==="idea"?"selected":""}>${s.icon} ${s.label}</option>`).join("")}
       </select>
     </div>
+    <div class="field"><label>Assign to (optional)</label>
+      <select id="biAssign">
+        <option value="">Unassigned</option>
+        ${DEFAULT_USERS.map(u => `<option value="${u}">\u{1F464} ${u}</option>`).join("")}
+      </select>
+    </div>
     <div class="modal-actions"><button id="biCancel">Cancel</button><button class="primary" id="biAdd">Add items</button></div>
   `);
   wrap.querySelector("#biCancel").onclick = () => wrap.remove();
@@ -1408,30 +1472,45 @@ function openBulkInsertModal(categories, peopleList) {
     const text = wrap.querySelector("#biText").value;
     const cat = wrap.querySelector("#biCat").value;
     const status = wrap.querySelector("#biStatus").value;
-    await addItemsBulk(state.current.id, text, cat, status);
+    const assignee = wrap.querySelector("#biAssign").value;
+    await addItemsBulk(state.current.id, text, cat, status, assignee);
     wrap.remove();
   };
 }
 
-function openItemEditModal(it) {
+function openItemEditModal(it, categories) {
   const peopleList = computeEffectivePeople(state.current, state.configDoc);
   let selectedAssignee = it.assignedTo || "";
   let selectedPackFor = it.packFor || "";
+  const catOptions = (categories && categories.length ? categories : [it.category || "Uncategorized"]);
   const wrap = openModal(`
-    <h3>Edit item</h3>
+    <h3>\u270F\uFE0F Edit item</h3>
     <div class="field"><label>Name</label><input type="text" id="ieName" value="${escapeHtml(it.name)}" /></div>
-    <div class="field"><label>Notes (optional)</label><input type="text" id="ieNotes" value="${escapeHtml(it.notes||"")}" /></div>
+    <div class="field"><label>\u{1F4C1} Category</label>
+      <select id="ieCategory">
+        ${catOptions.map(c => `<option value="${escapeHtml(c)}" ${c===(it.category||"Uncategorized")?"selected":""}>${escapeHtml(c)}</option>`).join("")}
+        <option value="__new__">+ New category\u2026</option>
+      </select>
+    </div>
+    <div class="field"><label>\u{1F4DD} Notes (optional)</label><input type="text" id="ieNotes" value="${escapeHtml(it.notes||"")}" /></div>
     <div class="field">
-      <label>Packing for (whose item, optional)</label>
+      <label>\u{1F3F7}\uFE0F Packing for (whose item, optional)</label>
       <div class="chip-select-row" id="iePackForChips">
         ${peopleList.map(p => `<button type="button" class="chip-select ${p===selectedPackFor?"active":""}" data-pack="${escapeHtml(p)}">${escapeHtml(p)}</button>`).join("")}
       </div>
     </div>
     <div class="field">
-      <label>Assigned to (who's responsible, optional)</label>
+      <label>\u{1F464} Assigned to (who's responsible, optional)</label>
       <div class="chip-select-row" id="ieAssignedChips">
         ${DEFAULT_USERS.map(u => `<button type="button" class="chip-select ${u===selectedAssignee?"active":""}" data-assignee="${escapeHtml(u)}">${escapeHtml(u)}</button>`).join("")}
       </div>
+    </div>
+    <div class="field">
+      <label>\u2795\u{1F3F7}\uFE0F Add a copy for someone else</label>
+      <div class="chip-select-row" id="ieDupChips">
+        ${peopleList.map(p => `<button type="button" class="chip-select" data-dupfor="${escapeHtml(p)}">+ ${escapeHtml(p)}</button>`).join("")}
+      </div>
+      <div class="muted" style="margin-top:0.3rem;">Creates a fresh copy of this item (same name/category/notes) packed for that person instead.</div>
     </div>
     <div class="modal-actions">
       <button class="danger" id="ieDelete" style="margin-right:auto;">Archive item</button>
@@ -1439,6 +1518,19 @@ function openItemEditModal(it) {
       <button class="primary" id="ieSave">Save</button>
     </div>
   `);
+  const catSel = wrap.querySelector("#ieCategory");
+  catSel.addEventListener("change", e => {
+    if (e.target.value === "__new__") {
+      const n = prompt("New category name:");
+      if (n) {
+        const opt = document.createElement("option");
+        opt.value = n; opt.textContent = n; opt.selected = true;
+        e.target.insertBefore(opt, e.target.lastElementChild);
+      } else {
+        e.target.value = it.category || "Uncategorized";
+      }
+    }
+  });
   wrap.querySelectorAll("#iePackForChips [data-pack]").forEach(chip => {
     chip.onclick = () => {
       selectedPackFor = selectedPackFor === chip.dataset.pack ? "" : chip.dataset.pack;
@@ -1451,6 +1543,20 @@ function openItemEditModal(it) {
       wrap.querySelectorAll("#ieAssignedChips [data-assignee]").forEach(c => c.classList.toggle("active", c.dataset.assignee === selectedAssignee));
     };
   });
+  wrap.querySelectorAll("#ieDupChips [data-dupfor]").forEach(chip => {
+    chip.onclick = async () => {
+      const person = chip.dataset.dupfor;
+      const name = wrap.querySelector("#ieName").value.trim() || it.name;
+      const category = catSel.value === "__new__" ? (it.category || "Uncategorized") : catSel.value;
+      const notes = wrap.querySelector("#ieNotes").value.trim();
+      await addDoc(collection(db, "checklists", state.current.id, "items"), {
+        name, category, status: "idea",
+        notes, assignedTo: "", packFor: person,
+        archived: false, createdAt: serverTimestamp()
+      });
+      showToast(`Added a copy for ${person}`);
+    };
+  });
   wrap.querySelector("#ieCancel").onclick = () => wrap.remove();
   wrap.querySelector("#ieDelete").onclick = async () => {
     await updateDoc(doc(db, "checklists", state.current.id, "items", it.id), { archived: true });
@@ -1459,8 +1565,18 @@ function openItemEditModal(it) {
   wrap.querySelector("#ieSave").onclick = async () => {
     const name = wrap.querySelector("#ieName").value.trim();
     const notes = wrap.querySelector("#ieNotes").value.trim();
+    const category = catSel.value === "__new__" ? (it.category || "Uncategorized") : catSel.value;
     if (!name) return;
-    await updateDoc(doc(db, "checklists", state.current.id, "items", it.id), { name, notes, packFor: selectedPackFor, assignedTo: selectedAssignee });
+    if (category !== (it.category || "Uncategorized")) {
+      const list = state.current;
+      const cats = [...(list.categories || [])];
+      if (!cats.includes(category)) {
+        cats.push(category);
+        await updateDoc(doc(db, "checklists", list.id), { categories: cats });
+      }
+    }
+    await updateDoc(doc(db, "checklists", state.current.id, "items", it.id), { name, notes, category, packFor: selectedPackFor, assignedTo: selectedAssignee });
+    applyFilterGrace({ ...it, name, notes, category, packFor: selectedPackFor, assignedTo: selectedAssignee });
     wrap.remove();
   };
 }
