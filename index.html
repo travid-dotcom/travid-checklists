@@ -1,0 +1,1536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Travid Checklists</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #ece9e1;
+    --card-bg: #ffffff;
+    --border: #d8d5cb;
+    --text: #26241f;
+    --text-dim: #6b6860;
+    --accent: #b5793a;
+    --accent-dim: #e8d9c4;
+    --danger: #a94442;
+    --focus: #4a6fa5;
+
+    --s-idea: #8b8fa3;
+    --s-toget: #4a6fa5;
+    --s-acquired: #7b5ea7;
+    --s-readypack: #b5793a;
+    --s-readypackcold: #2f8fa8;
+    --s-packed: #3a8f6e;
+
+    --radius: 12px;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #121110;
+    --card-bg: #29261f;
+    --border: #45412f;
+    --text: #f2f0e9;
+    --text-dim: #b0aca0;
+    --accent: #d79b56;
+    --accent-dim: #4a3c28;
+    --danger: #e08b87;
+    --focus: #7fa3d6;
+  }
+  * { box-sizing: border-box; }
+  html { font-size: 108%; } /* respects OS/browser text-size settings */
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 1rem;
+    line-height: 1.45;
+    -webkit-text-size-adjust: 100%;
+  }
+  button, input, select, textarea {
+    font: inherit;
+    color: inherit;
+  }
+  button {
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    border-radius: 10px;
+    padding: 0.55em 0.9em;
+  }
+  button:active { transform: translateY(1px); }
+  button.primary {
+    background: var(--focus);
+    border-color: var(--focus);
+    color: #fff;
+    font-weight: 600;
+  }
+  button.danger { color: var(--danger); border-color: var(--danger); background: transparent; }
+  button.ghost { background: transparent; border-color: transparent; }
+  input[type=text], input[type=date], input[type=password], textarea, select {
+    padding: 0.6em 0.7em;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--card-bg);
+    color: var(--text);
+    width: 100%;
+  }
+  a { color: var(--focus); }
+  .app-shell { max-width: 1100px; margin: 0 auto; padding: 1rem 1rem 6rem; }
+  header.top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 0.75rem; margin-bottom: 1.25rem; flex-wrap: wrap;
+  }
+  header.top h1 { font-size: 1.35rem; margin: 0; }
+  .user-badge {
+    display: flex; align-items: center; gap: 0.5rem;
+    background: var(--card-bg); border: 1px solid var(--border);
+    padding: 0.4em 0.7em; border-radius: 999px; font-size: 0.9rem;
+  }
+  .avatar {
+    width: 1.6em; height: 1.6em; border-radius: 50%;
+    background: var(--focus); color: #fff; display: flex; align-items: center;
+    justify-content: center; font-weight: 700; font-size: 0.8em; flex-shrink:0;
+  }
+
+  /* ---------- gate screens (pin / user picker) ---------- */
+  .gate-wrap {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+  }
+  .gate-card {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 1.75rem; max-width: 380px; width: 100%; text-align: center;
+  }
+  .gate-card h2 { margin-top: 0; }
+  .who-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin: 1rem 0; }
+  .who-btn {
+    padding: 1.1rem 0.5rem; border-radius: var(--radius); font-weight: 600; font-size: 1.05rem;
+  }
+  .who-btn.selected { outline: 3px solid var(--focus); }
+
+  /* ---------- overview page ---------- */
+  .toolbar { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
+  .grid-cards {
+    display: grid; gap: 0.85rem;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 640px) {
+    .grid-cards { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (min-width: 980px) {
+    .grid-cards { grid-template-columns: repeat(3, 1fr); }
+  }
+  .list-card {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 1rem; display: flex; flex-direction: column; gap: 0.4rem;
+    text-decoration: none; color: inherit; box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .list-card h3 { margin: 0 0 0.15rem; font-size: 1.1rem; }
+  .list-card .meta-row { font-size: 0.85rem; color: var(--text-dim); }
+  .list-card .actions { display: flex; gap: 0.4rem; margin-top: 0.6rem; flex-wrap: wrap; }
+  .list-card .actions button { font-size: 0.85rem; padding: 0.4em 0.7em; }
+  .progress-bar { height: 6px; border-radius: 4px; background: var(--border); overflow: hidden; margin-top: 0.3rem; }
+  .progress-bar > div { height: 100%; background: var(--accent); }
+  .empty-state { text-align: center; padding: 3rem 1rem; color: var(--text-dim); }
+
+  /* ---------- checklist detail ---------- */
+  .list-header {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 1rem; margin-bottom: 1rem; box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .list-header .title-row { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+  .list-header h2 { margin: 0; font-size: 1.3rem; }
+  .list-header .sub { font-size: 0.85rem; color: var(--text-dim); margin-top: 0.3rem; }
+  .back-link { display: inline-flex; align-items: center; gap: 0.3rem; margin-bottom: 0.75rem; font-size: 0.9rem; }
+
+  .category-block {
+    margin-bottom: 1.1rem; background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .category-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.7rem 0.9rem; background: var(--accent-dim); font-weight: 700; gap: 0.5rem;
+  }
+  .category-head .cat-actions { display: flex; gap: 0.3rem; }
+  .category-head .cat-actions button { padding: 0.2em 0.5em; font-size: 0.8rem; }
+  .items-columns {
+    display: grid; grid-template-columns: 1fr;
+  }
+  @media (min-width: 760px) {
+    .items-columns { grid-template-columns: 1fr 1fr; }
+  }
+  @media (min-width: 1080px) {
+    .items-columns { grid-template-columns: 1fr 1fr 1fr; }
+  }
+  .item-row {
+    display: flex; align-items: center; gap: 0.6rem; padding: 0.65rem 0.9rem;
+    border-top: 1px solid var(--border);
+  }
+  .item-row.archived { opacity: 0.55; }
+  .item-row input[type=checkbox] { width: 1.2em; height: 1.2em; flex-shrink: 0; }
+  .item-main { flex: 1; min-width: 0; }
+  .item-name { font-weight: 600; word-break: break-word; }
+  .edit-pencil-inline {
+    background: transparent; border: none; padding: 0 0.25em; font-size: 0.68em; opacity: 0.35;
+    vertical-align: middle; line-height: 1;
+  }
+  .edit-pencil-inline:active { opacity: 0.75; }
+  .item-sub { font-size: 0.78rem; color: var(--text-dim); display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .status-chip {
+    border: none; border-radius: 999px; padding: 0.35em 0.7em; font-size: 0.8rem; font-weight: 700;
+    color: #fff; display: inline-flex; align-items: center; gap: 0.3em; white-space: nowrap;
+    user-select: none; -webkit-user-select: none;
+  }
+
+  .fab-row { position: sticky; bottom: 0; display: flex; gap: 0.6rem; justify-content: flex-end; padding: 0.75rem 0; background: linear-gradient(transparent, var(--bg) 30%); }
+
+  .bulk-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; background: #3d3829; color: #fff;
+    padding: 0.85rem 1rem; display: flex; gap: 0.55rem; align-items: center; flex-wrap: wrap;
+    justify-content: center; z-index: 40; border-top: 2px solid var(--accent);
+    box-shadow: 0 -6px 22px rgba(0,0,0,0.45);
+  }
+  .bulk-bar span { font-weight: 600; }
+  .bulk-bar button, .bulk-bar select {
+    background: #fff; color: #26241f; border: none; border-radius: 999px;
+    padding: 0.5em 1em; font-size: 0.88rem;
+  }
+  .bulk-bar select {
+    appearance: none; -webkit-appearance: none; padding-right: 2.2em;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%2326241f'%3E%3Cpath d='M5.5 7.5l4.5 4.5 4.5-4.5' stroke='%2326241f' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 0.75em center; background-size: 1em;
+  }
+  .bulk-bar button:active { transform: translateY(1px); }
+
+  /* ---------- modal ---------- */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center;
+    justify-content: center; padding: 1rem; z-index: 50;
+  }
+  .modal {
+    background: var(--card-bg); border-radius: var(--radius); padding: 1.25rem; max-width: 480px; width: 100%;
+    max-height: 90vh; overflow-y: auto;
+  }
+  .modal h3 { margin-top: 0; }
+  .field { margin-bottom: 0.9rem; }
+  .field label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+
+  .status-menu {
+    position: absolute; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.35); padding: 0.35rem; z-index: 60; min-width: 200px;
+  }
+  .status-menu button {
+    width: 100%; text-align: left; border: none; background: transparent; padding: 0.5em 0.6em;
+    display: flex; align-items: center; gap: 0.5em; border-radius: 8px; color: var(--text);
+  }
+  .status-menu button:hover { background: var(--accent-dim); }
+  .status-dot { width: 0.85em; height: 0.85em; border-radius: 50%; flex-shrink: 0; }
+
+  .toast {
+    position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: var(--text);
+    color: #fff; padding: 0.6em 1em; border-radius: 999px; font-size: 0.85rem; z-index: 80;
+  }
+  .muted { color: var(--text-dim); font-size: 0.85rem; }
+  .row-gap { display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; }
+  .archived-toggle { font-size: 0.85rem; }
+
+  .theme-toggle { padding: 0.4em 0.6em; font-size: 1rem; line-height: 1; }
+
+  .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+  .segmented button {
+    border: none; border-radius: 0; background: transparent; padding: 0.45em 1em; font-size: 0.9rem;
+  }
+  .segmented button.active { background: var(--focus); color: #fff; font-weight: 600; }
+
+  .fab {
+    position: fixed; right: 1.1rem; bottom: 1.3rem; width: 3.4rem; height: 3.4rem; border-radius: 50%;
+    background: var(--focus); color: #fff; font-size: 1.6rem; display: flex; align-items: center;
+    justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.3); border: none; z-index: 45; padding: 0;
+  }
+
+  .more-menu-wrap { position: relative; display: inline-block; }
+  .more-menu {
+    position: absolute; right: 0; top: calc(100% + 0.3rem); background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    padding: 0.35rem; z-index: 55; min-width: 220px;
+  }
+  .more-menu button, .more-menu label {
+    width: 100%; text-align: left; border: none; background: transparent; padding: 0.55em 0.6em;
+    display: flex; align-items: center; gap: 0.5em; border-radius: 8px; font-size: 0.9rem;
+  }
+  .more-menu button:hover { background: var(--accent-dim); }
+
+  .notes-banner {
+    background: var(--accent-dim); border-radius: 10px; padding: 0.75rem 0.9rem; margin-top: 0.7rem;
+    font-size: 0.85rem;
+  }
+  .notes-banner textarea { margin-top: 0.4rem; }
+
+  .people-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.4rem; }
+  .people-chip {
+    padding: 0.35em 0.75em; border-radius: 999px; font-size: 0.85rem;
+    border: 1px solid var(--border); background: var(--card-bg);
+  }
+  .item-sub .tag-pack { font-weight: 600; }
+
+  .status-filter-row { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.6rem; }
+  .status-pill {
+    border-radius: 999px; padding: 0.3em 0.75em; font-size: 0.8rem; font-weight: 600;
+    border: 1.5px solid var(--pill-color); background: transparent; color: var(--text);
+    display: inline-flex; align-items: center; gap: 0.35em;
+  }
+  .status-pill.active { background: var(--pill-color); color: #fff; }
+  .status-pill .pill-count {
+    background: rgba(128,128,128,0.25); border-radius: 999px; padding: 0.05em 0.5em; font-size: 0.85em;
+  }
+  .status-pill.active .pill-count { background: rgba(255,255,255,0.35); }
+
+  .cat-chevron {
+    display: inline-block; font-size: 0.75rem; margin-right: 0.5rem; color: var(--text-dim);
+    transition: transform 0.15s ease; transform: rotate(90deg);
+  }
+  .cat-chevron.collapsed { transform: rotate(0deg); }
+  .cat-check { color: var(--s-packed); font-weight: 900; margin-left: 0.4em; }
+  .category-head.full { background: color-mix(in srgb, var(--s-packed) 20%, var(--accent-dim)); }
+  .category-head { cursor: pointer; user-select: none; }
+  .cat-head-left { display: flex; align-items: center; min-width: 0; }
+
+  /* ---------- list header rhythm ---------- */
+  .lh-stack { display: flex; flex-direction: column; gap: 0.85rem; margin-top: 0.9rem; }
+  .lh-row { font-size: 0.85rem; color: var(--text-dim); display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .lh-progress { display: flex; flex-direction: column; gap: 0.35rem; }
+  .lh-filters { display: flex; flex-direction: column; gap: 0.5rem; }
+  .filter-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); font-weight: 700; }
+
+  /* ---------- chip select (assigned to / packing for) ---------- */
+  .chip-select-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .chip-select {
+    padding: 0.4em 0.85em; border-radius: 999px; font-size: 0.85rem;
+    border: 1.5px solid var(--border); background: var(--card-bg); color: var(--text);
+  }
+  .chip-select.active { background: var(--focus); border-color: var(--focus); color: #fff; font-weight: 600; }
+
+  .search-box { position: relative; }
+  .search-box input { padding-left: 2.2em; }
+  .search-box::before {
+    content: "\1F50D"; position: absolute; left: 0.65em; top: 50%; transform: translateY(-50%);
+    font-size: 0.9em; opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import {
+  getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
+  getDoc, getDocs, onSnapshot, query, orderBy, serverTimestamp, writeBatch, where
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+/* ============================= CONFIG ============================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyDOVfwhDEpEC1VsxH3qvU3oNvoL8VnRITE",
+  authDomain: "travid-checklists.firebaseapp.com",
+  projectId: "travid-checklists",
+  storageBucket: "travid-checklists.firebasestorage.app",
+  messagingSenderId: "203110839800",
+  appId: "1:203110839800:web:a3eddbdaaf94446a27920d"
+};
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+
+const DEFAULT_USERS = ["Tracy", "David"];
+// People items can be packed for (broader than login users - includes kids).
+// Edit this list any time to add/remove household members.
+const HOUSEHOLD_PEOPLE = ["Tracy", "David", "Harper", "Beckett"];
+const AUTO_ARCHIVE_DAYS = 14;
+
+const STATUSES = [
+  { id: "idea",            label: "Idea",                 color: "var(--s-idea)",        icon: "\u{1F4A1}" },
+  { id: "to_get",          label: "To get",               color: "var(--s-toget)",       icon: "\u{1F6D2}" },
+  { id: "acquired",        label: "Acquired",             color: "var(--s-acquired)",    icon: "\u{1F4E5}" },
+  { id: "ready_pack",      label: "Ready to pack",        color: "var(--s-readypack)",   icon: "\u{1F392}" },
+  { id: "ready_pack_cold", label: "Ready to pack (cold)", color: "var(--s-readypackcold)", icon: "\u2744" },
+  { id: "packed",          label: "Packed",               color: "var(--s-packed)",      icon: "\u2705" },
+];
+const statusById = Object.fromEntries(STATUSES.map(s => [s.id, s]));
+// Mutable "effective" status list for whichever checklist is currently open —
+// built-ins plus any custom statuses (global + this-checklist-only), merged in insertion order.
+let effStatuses = STATUSES;
+let effStatusById = statusById;
+function computeEffectiveStatuses(list, configDoc) {
+  const customs = [
+    ...((configDoc && configDoc.customStatuses) || []),
+    ...((list && list.customStatuses) || [])
+  ].sort((a, b) => (a.createdAt||0) - (b.createdAt||0));
+  let order = STATUSES.map(s => ({ ...s }));
+  customs.forEach(c => {
+    const entry = { id: c.id, label: c.label, color: c.color, icon: c.icon };
+    if (c.insertAfter === null) {
+      order.unshift(entry);
+    } else {
+      const idx = order.findIndex(s => s.id === c.insertAfter);
+      if (idx === -1) order.push(entry); else order.splice(idx + 1, 0, entry);
+    }
+  });
+  return order;
+}
+// Custom statuses as raw editable entries, tagged with where they live.
+function getCustomStatusEntries(list, configDoc) {
+  const global = ((configDoc && configDoc.customStatuses) || []).map(c => ({ ...c, scope: "global" }));
+  const local = ((list && list.customStatuses) || []).map(c => ({ ...c, scope: "local" }));
+  return [...global, ...local];
+}
+// Effective "packing for" people: built-in household + any custom additions (global + this checklist).
+function computeEffectivePeople(list, configDoc) {
+  const names = [...HOUSEHOLD_PEOPLE];
+  ((configDoc && configDoc.customPeople) || []).forEach(p => { if (!names.includes(p.name)) names.push(p.name); });
+  ((list && list.customPeople) || []).forEach(p => { if (!names.includes(p.name)) names.push(p.name); });
+  return names;
+}
+function getCustomPeopleEntries(list, configDoc) {
+  const global = ((configDoc && configDoc.customPeople) || []).map(p => ({ ...p, scope: "global" }));
+  const local = ((list && list.customPeople) || []).map(p => ({ ...p, scope: "local" }));
+  return [...global, ...local];
+}
+
+const CATEGORY_KEYWORDS = {
+  "Clothing": ["shirt","pants","sock","underwear","jacket","coat","shoe","dress","sweater","hat","glove","scarf","pajama","swimsuit","short","jeans","belt"],
+  "Toiletries": ["toothbrush","toothpaste","shampoo","soap","deodorant","razor","sunscreen","lotion","floss","conditioner","brush","makeup"],
+  "Electronics": ["charger","phone","camera","laptop","cable","headphone","battery","adapter","kindle","tablet"],
+  "Documents": ["passport","id card","ticket","insurance","license","reservation","boarding pass"],
+  "Food & Snacks": ["snack","water bottle","granola","coffee","tea","gum","candy"],
+  "Kids": ["diaper","wipes","bottle","stroller","toy","pacifier","formula"],
+  "Gear": ["tent","backpack","flashlight","rope","cooler","chair","sleeping bag","umbrella"],
+  "Medications": ["medicine","medication","vitamin","pill","band-aid","bandage","first aid","sunscreen"],
+};
+
+/* ============================= STATE ============================= */
+let state = {
+  pinOk: false,
+  configDoc: null,
+  user: localStorage.getItem("cl_user") || null,
+  route: parseRoute(),
+  lists: [],
+  overviewView: "active", // "active" | "archived"
+  current: null,        // current checklist doc when on detail page
+  currentItems: [],
+  showArchivedItems: false,
+  selected: new Set(),
+  statusFilter: new Set(),
+  assigneeFilter: new Set(),
+  textFilter: "",
+  collapsedCategories: new Set(),
+  toast: null,
+  moreMenuOpen: false,
+  overviewMoreMenuOpen: false,
+  openCategoryMenu: null,
+  theme: localStorage.getItem("cl_theme") || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+};
+document.documentElement.setAttribute("data-theme", state.theme);
+function toggleTheme() {
+  state.theme = state.theme === "dark" ? "light" : "dark";
+  localStorage.setItem("cl_theme", state.theme);
+  document.documentElement.setAttribute("data-theme", state.theme);
+  render();
+}
+
+function parseRoute() {
+  const h = location.hash.replace(/^#\/?/, "");
+  if (h.startsWith("list/")) return { name: "list", id: h.slice(5) };
+  return { name: "overview" };
+}
+window.addEventListener("hashchange", () => { state.route = parseRoute(); state.selected = new Set(); state.statusFilter = new Set(); state.assigneeFilter = new Set(); state.textFilter = ""; mountRoute(); });
+
+function showToast(msg) {
+  state.toast = msg;
+  render();
+  setTimeout(() => { state.toast = null; render(); }, 2200);
+}
+
+/* ============================= HELPERS ============================= */
+function initials(name) {
+  return (name || "?").trim().split(/\s+/).map(w => w[0]).slice(0,2).join("").toUpperCase();
+}
+function fmtDate(d) {
+  if (!d) return "\u2014";
+  const dt = (d.toDate ? d.toDate() : new Date(d));
+  if (isNaN(dt)) return "\u2014";
+  return dt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+function relTime(d) {
+  if (!d) return "\u2014";
+  const dt = (d.toDate ? d.toDate() : new Date(d));
+  if (isNaN(dt)) return "\u2014";
+  const secs = Math.round((Date.now() - dt.getTime()) / 1000);
+  if (secs < 60) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min${mins===1?"":"s"} ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hr${hours===1?"":"s"} ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days} day${days===1?"":"s"} ago`;
+  const months = Math.round(days / 30);
+  if (months < 12) return `${months} mo${months===1?"":"s"} ago`;
+  const years = Math.round(months / 12);
+  return `${years} yr${years===1?"":"s"} ago`;
+}
+function guessCategory(itemName, existingCategories, deletedCategories) {
+  const lower = itemName.toLowerCase();
+  let matched = null;
+  for (const [cat, words] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (words.some(w => lower.includes(w))) { matched = cat; break; }
+  }
+  if (!matched) matched = "Misc";
+  if ((deletedCategories || []).some(c => c.toLowerCase() === matched.toLowerCase())) {
+    return existingCategories.includes("Misc") ? "Misc" : (existingCategories[0] || "Misc");
+  }
+  const existingMatch = existingCategories.find(c => c.toLowerCase() === matched.toLowerCase());
+  return existingMatch || matched;
+}
+
+/* ============================= PIN / CONFIG ============================= */
+let unsubConfig = null;
+function initConfigListener() {
+  return new Promise(resolve => {
+    let first = true;
+    unsubConfig = onSnapshot(doc(db, "meta", "config"), snap => {
+      state.configDoc = snap.exists() ? snap.data() : null;
+      const savedPin = localStorage.getItem("cl_pin");
+      if (state.configDoc && savedPin && savedPin === state.configDoc.pin) {
+        state.pinOk = true;
+      }
+      if (first) { first = false; resolve(); }
+      else { render(); }
+    });
+  });
+}
+
+async function submitPinSetup(pin) {
+  await setDoc(doc(db, "meta", "config"), { pin, customStatuses: [], customPeople: [] });
+  localStorage.setItem("cl_pin", pin);
+  state.configDoc = { pin, customStatuses: [], customPeople: [] };
+  state.pinOk = true;
+  render();
+}
+async function submitPinEntry(pin) {
+  if (state.configDoc && pin === state.configDoc.pin) {
+    localStorage.setItem("cl_pin", pin);
+    state.pinOk = true;
+    render();
+  } else {
+    showToast("Wrong PIN");
+  }
+}
+
+/* ============================= FIRESTORE: LISTS ============================= */
+let unsubLists = null;
+function listenLists() {
+  if (unsubLists) unsubLists();
+  const q = query(collection(db, "checklists"), orderBy("updatedAt", "desc"));
+  unsubLists = onSnapshot(q, snap => {
+    state.lists = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    runAutoArchiveCheck(state.lists);
+    render();
+  });
+}
+
+// Auto-archives checklists whose event date passed more than AUTO_ARCHIVE_DAYS ago.
+// Runs client-side whenever the overview loads (no server cron on a static site).
+const autoArchiveChecked = new Set();
+function runAutoArchiveCheck(lists) {
+  const now = Date.now();
+  lists.forEach(l => {
+    if (l.archived || !l.eventDate || autoArchiveChecked.has(l.id)) return;
+    const eventMs = new Date(l.eventDate + "T00:00:00").getTime();
+    if (isNaN(eventMs)) return;
+    const cutoff = eventMs + AUTO_ARCHIVE_DAYS * 24 * 60 * 60 * 1000;
+    if (now >= cutoff) {
+      autoArchiveChecked.add(l.id);
+      updateDoc(doc(db, "checklists", l.id), { archived: true, updatedAt: serverTimestamp(), updatedBy: "Auto-archive" });
+    }
+  });
+}
+
+async function createList(name, eventDate) {
+  const ref = await addDoc(collection(db, "checklists"), {
+    name, eventDate: eventDate || null,
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    updatedBy: state.user, archived: false,
+    categories: [], deletedCategories: []
+  });
+  location.hash = `#/list/${ref.id}`;
+}
+
+async function archiveList(id, archived) {
+  await updateDoc(doc(db, "checklists", id), { archived, updatedAt: serverTimestamp(), updatedBy: state.user });
+}
+
+async function duplicateList(srcList) {
+  const name = prompt("Name for the new checklist:", "Copy of " + srcList.name);
+  if (!name) return;
+  const eventDate = prompt("Event date (YYYY-MM-DD), optional:", "") || null;
+  const itemsSnap = await getDocs(collection(db, "checklists", srcList.id, "items"));
+  const newRef = await addDoc(collection(db, "checklists"), {
+    name, eventDate,
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    updatedBy: state.user, archived: false,
+    categories: srcList.categories || [], deletedCategories: srcList.deletedCategories || [],
+    customStatuses: srcList.customStatuses || [], customPeople: srcList.customPeople || []
+  });
+  const batch = writeBatch(db);
+  itemsSnap.docs.forEach(d => {
+    const data = d.data();
+    if (data.archived) return; // skip archived items
+    const newItemRef = doc(collection(db, "checklists", newRef.id, "items"));
+    batch.set(newItemRef, {
+      name: data.name, category: data.category, status: "idea",
+      notes: data.notes || "", assignedTo: data.assignedTo || "", packFor: data.packFor || "",
+      archived: false, createdAt: serverTimestamp()
+    });
+  });
+  await batch.commit();
+  showToast("Duplicated \u2014 opening new list");
+  location.hash = `#/list/${newRef.id}`;
+}
+
+/* ============================= FIRESTORE: CHECKLIST DETAIL ============================= */
+let unsubCurrent = null, unsubItems = null;
+function listenCurrent(id) {
+  if (unsubCurrent) unsubCurrent();
+  if (unsubItems) unsubItems();
+  unsubCurrent = onSnapshot(doc(db, "checklists", id), snap => {
+    if (!snap.exists()) { state.current = null; render(); return; }
+    state.current = { id: snap.id, ...snap.data() };
+    render();
+  });
+  unsubItems = onSnapshot(collection(db, "checklists", id, "items"), snap => {
+    state.currentItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
+  });
+}
+
+async function touchList(id) {
+  await updateDoc(doc(db, "checklists", id), { updatedAt: serverTimestamp(), updatedBy: state.user });
+}
+
+// Parses trailing [Name, Name] / [Everyone] tags off a line.
+// Returns { name, people: [] } - people is [] when no tag was present.
+function parseLinePeople(line, effPeople) {
+  let people = [];
+  const cleaned = line.replace(/\[([^\]]+)\]/g, (_, inner) => {
+    const names = inner.split(",").map(s => s.trim()).filter(Boolean);
+    names.forEach(n => {
+      if (n.toLowerCase() === "everyone" || n.toLowerCase() === "all") {
+        effPeople.forEach(p => { if (!people.includes(p)) people.push(p); });
+      } else if (!people.includes(n)) {
+        people.push(n);
+      }
+    });
+    return "";
+  }).replace(/\s+/g, " ").trim();
+  return { name: cleaned, people };
+}
+
+async function addItemsBulk(listId, rawText, categoryChoice, statusChoice) {
+  const rawLines = rawText.split("\n").map(l => l.trim()).filter(Boolean);
+  if (!rawLines.length) return;
+  const list = state.current;
+  const effPeople = computeEffectivePeople(list, state.configDoc);
+  let categories = [...(list.categories || [])];
+  const deleted = list.deletedCategories || [];
+  const batch = writeBatch(db);
+  let count = 0;
+  rawLines.forEach(rawLine => {
+    const { name, people } = parseLinePeople(rawLine, effPeople);
+    if (!name) return;
+    const cat = categoryChoice === "__auto__" ? guessCategory(name, categories, deleted) : categoryChoice;
+    if (!categories.includes(cat)) categories.push(cat);
+    const targets = people.length ? people : [null]; // null = no person tag, single item
+    targets.forEach(person => {
+      const ref = doc(collection(db, "checklists", listId, "items"));
+      batch.set(ref, {
+        name, category: cat, status: statusChoice || "idea",
+        notes: "", assignedTo: "", packFor: person || "",
+        archived: false, createdAt: serverTimestamp()
+      });
+      count++;
+    });
+  });
+  batch.update(doc(db, "checklists", listId), { categories, updatedAt: serverTimestamp(), updatedBy: state.user });
+  await batch.commit();
+  showToast(`Added ${count} item${count>1?"s":""}`);
+}
+
+async function cycleStatus(item) {
+  const idx = effStatuses.findIndex(s => s.id === item.status);
+  const next = effStatuses[(idx + 1) % effStatuses.length];
+  await updateDoc(doc(db, "checklists", state.current.id, "items", item.id), { status: next.id });
+  await touchList(state.current.id);
+}
+async function setStatus(itemIds, statusId) {
+  const batch = writeBatch(db);
+  itemIds.forEach(id => batch.update(doc(db, "checklists", state.current.id, "items", id), { status: statusId }));
+  await batch.commit();
+  await touchList(state.current.id);
+}
+async function setCategoryBulk(itemIds, category) {
+  const list = state.current;
+  let categories = [...(list.categories || [])];
+  if (!categories.includes(category)) categories.push(category);
+  const batch = writeBatch(db);
+  itemIds.forEach(id => batch.update(doc(db, "checklists", state.current.id, "items", id), { category }));
+  batch.update(doc(db, "checklists", list.id), { categories, updatedAt: serverTimestamp(), updatedBy: state.user });
+  await batch.commit();
+}
+async function setAssigneeBulk(itemIds, assignedTo) {
+  const batch = writeBatch(db);
+  itemIds.forEach(id => batch.update(doc(db, "checklists", state.current.id, "items", id), { assignedTo }));
+  await batch.commit();
+  await touchList(state.current.id);
+}
+async function archiveItems(itemIds, archived) {
+  const batch = writeBatch(db);
+  itemIds.forEach(id => batch.update(doc(db, "checklists", state.current.id, "items", id), { archived }));
+  await batch.commit();
+  await touchList(state.current.id);
+}
+
+async function renameCategory(oldName, newName) {
+  if (!newName || newName === oldName) return;
+  const list = state.current;
+  const categories = (list.categories || []).map(c => c === oldName ? newName : c);
+  const affected = state.currentItems.filter(it => it.category === oldName);
+  const batch = writeBatch(db);
+  affected.forEach(it => batch.update(doc(db, "checklists", list.id, "items", it.id), { category: newName }));
+  batch.update(doc(db, "checklists", list.id), { categories, updatedAt: serverTimestamp(), updatedBy: state.user });
+  await batch.commit();
+}
+async function deleteCategory(name) {
+  const list = state.current;
+  if (!confirm(`Delete category "${name}"? Items in it will move to Uncategorized.`)) return;
+  const categories = (list.categories || []).filter(c => c !== name);
+  const deletedCategories = [...(list.deletedCategories || []), name];
+  const affected = state.currentItems.filter(it => it.category === name);
+  const batch = writeBatch(db);
+  affected.forEach(it => batch.update(doc(db, "checklists", list.id, "items", it.id), { category: "Uncategorized" }));
+  if (!categories.includes("Uncategorized") && affected.length) categories.push("Uncategorized");
+  batch.update(doc(db, "checklists", list.id), { categories, deletedCategories, updatedAt: serverTimestamp(), updatedBy: state.user });
+  await batch.commit();
+}
+
+/* ============================= RENDER ============================= */
+const appEl = document.getElementById("app");
+
+function render() {
+  if (!state.pinOk) return renderPinGate();
+  if (!state.user) return renderUserGate();
+  if (state.route.name === "overview") return renderOverview();
+  if (state.route.name === "list") return renderListDetail();
+}
+
+function renderPinGate() {
+  const needsSetup = state.configDoc === null;
+  appEl.innerHTML = `
+    <div class="gate-wrap"><div class="gate-card">
+      <h2>${needsSetup ? "Set a PIN" : "Enter PIN"}</h2>
+      <p class="muted">${needsSetup ? "This creates the shared PIN for you and David." : "Enter the shared PIN to continue."}</p>
+      <div class="field"><input type="password" id="pinInput" inputmode="numeric" placeholder="PIN" autofocus /></div>
+      <button class="primary" id="pinSubmit" style="width:100%">Continue</button>
+    </div></div>
+  `;
+  document.getElementById("pinSubmit").onclick = () => {
+    const val = document.getElementById("pinInput").value.trim();
+    if (!val) return;
+    needsSetup ? submitPinSetup(val) : submitPinEntry(val);
+  };
+  document.getElementById("pinInput").addEventListener("keydown", e => {
+    if (e.key === "Enter") document.getElementById("pinSubmit").click();
+  });
+}
+
+function renderUserGate() {
+  appEl.innerHTML = `
+    <div class="gate-wrap"><div class="gate-card">
+      <h2>Who are you?</h2>
+      <div class="who-grid">
+        ${DEFAULT_USERS.map(u => `<button class="who-btn" data-user="${u}">${u}</button>`).join("")}
+      </div>
+      <p class="muted">Someone else?</p>
+      <div class="field row-gap">
+        <input type="text" id="otherUser" placeholder="Name" />
+        <button id="otherUserGo">Go</button>
+      </div>
+    </div></div>
+  `;
+  appEl.querySelectorAll(".who-btn").forEach(btn => {
+    btn.onclick = () => { state.user = btn.dataset.user; localStorage.setItem("cl_user", state.user); bootAfterAuth(); };
+  });
+  document.getElementById("otherUserGo").onclick = () => {
+    const v = document.getElementById("otherUser").value.trim();
+    if (!v) return;
+    state.user = v; localStorage.setItem("cl_user", v); bootAfterAuth();
+  };
+}
+
+function renderOverview() {
+  const lists = state.lists.filter(l => state.overviewView === "archived" ? l.archived : !l.archived);
+  appEl.innerHTML = `
+    <div class="app-shell" style="padding-top:1rem;">
+    <header class="top">
+      <h1>\u{1F9F3} Travid Checklists</h1>
+      <div class="row-gap">
+        <div class="more-menu-wrap">
+          <button id="ovMoreBtn">\u22EF</button>
+          ${state.overviewMoreMenuOpen ? `
+            <div class="more-menu" id="ovMoreMenu">
+              <button id="ovThemeToggle">${state.theme === "dark" ? "\u2600\uFE0F Light mode" : "\u{1F319} Dark mode"}</button>
+            </div>` : ""}
+        </div>
+        <div class="user-badge"><div class="avatar">${initials(state.user)}</div> ${state.user} <button class="ghost" id="switchUser" style="padding:0.2em 0.5em;font-size:0.8rem;">switch</button></div>
+      </div>
+    </header>
+    <div class="toolbar">
+      <button class="primary" id="newListBtn">+ New checklist</button>
+      <div class="segmented">
+        <button id="viewActive" class="${state.overviewView==="active"?"active":""}">Active</button>
+        <button id="viewArchived" class="${state.overviewView==="archived"?"active":""}">Archived</button>
+      </div>
+    </div>
+    ${lists.length ? `<div class="grid-cards">${lists.map(renderListCard).join("")}</div>` : `<div class="empty-state">${state.overviewView==="archived" ? "No archived checklists." : "No checklists yet. Create your first one."}</div>`}
+    </div>
+    ${state.toast ? `<div class="toast">${state.toast}</div>` : ""}
+  `;
+  document.getElementById("newListBtn").onclick = () => openNewListModal();
+  document.getElementById("switchUser").onclick = () => { state.user = null; localStorage.removeItem("cl_user"); render(); };
+  document.getElementById("ovMoreBtn").onclick = (e) => { e.stopPropagation(); state.overviewMoreMenuOpen = !state.overviewMoreMenuOpen; render(); };
+  if (state.overviewMoreMenuOpen) {
+    document.getElementById("ovThemeToggle").onclick = () => { state.overviewMoreMenuOpen = false; toggleTheme(); };
+    setTimeout(() => document.addEventListener("click", () => { if (state.overviewMoreMenuOpen) { state.overviewMoreMenuOpen = false; render(); } }, { once: true }), 0);
+  }
+  document.getElementById("viewActive").onclick = () => { state.overviewView = "active"; render(); };
+  document.getElementById("viewArchived").onclick = () => { state.overviewView = "archived"; render(); };
+  lists.forEach(l => {
+    const dupBtn = document.getElementById(`dup-${l.id}`);
+    const archBtn = document.getElementById(`arch-${l.id}`);
+    if (dupBtn) dupBtn.onclick = (e) => { e.preventDefault(); duplicateList(l); };
+    if (archBtn) archBtn.onclick = (e) => { e.preventDefault(); archiveList(l.id, !l.archived); };
+  });
+}
+
+function renderListCard(l) {
+  return `
+    <a class="list-card" href="#/list/${l.id}">
+      <h3>${escapeHtml(l.name)}</h3>
+      <div class="meta-row">Event: ${l.eventDate ? new Date(l.eventDate).toLocaleDateString() : "\u2014"}</div>
+      <div class="meta-row">Created ${fmtDate(l.createdAt)}</div>
+      <div class="meta-row">Updated ${fmtDate(l.updatedAt)}${l.updatedBy ? " by " + escapeHtml(l.updatedBy) : ""}</div>
+      <div class="actions">
+        <button id="dup-${l.id}">Duplicate</button>
+        <button id="arch-${l.id}" class="${l.archived ? "" : "danger"}">${l.archived ? "Unarchive" : "Archive"}</button>
+      </div>
+    </a>
+  `;
+}
+
+function passesFilters(it) {
+  if (state.statusFilter.size && !state.statusFilter.has(it.status)) return false;
+  if (state.assigneeFilter.size) {
+    const matchesAssignee = it.assignedTo ? state.assigneeFilter.has(it.assignedTo) : state.assigneeFilter.has("__unassigned__");
+    if (!matchesAssignee) return false;
+  }
+  if (state.textFilter) {
+    const q = state.textFilter.toLowerCase();
+    const hay = (it.name + " " + (it.notes||"")).toLowerCase();
+    if (!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+function renderListDetail() {
+  const list = state.current;
+  if (!list) { appEl.innerHTML = `<div class="app-shell"><p>Loading\u2026</p></div>`; return; }
+  effStatuses = computeEffectiveStatuses(list, state.configDoc);
+  effStatusById = Object.fromEntries(effStatuses.map(s => [s.id, s]));
+  const items = state.currentItems.filter(it => state.showArchivedItems ? true : !it.archived);
+  const categories = [...(list.categories || [])];
+  // include any stray categories present on items but not listed
+  items.forEach(it => { if (it.category && !categories.includes(it.category)) categories.push(it.category); });
+
+  const total = state.currentItems.filter(it => !it.archived).length;
+  const packed = state.currentItems.filter(it => !it.archived && it.status === "packed").length;
+  const pct = total ? Math.round((packed/total)*100) : 0;
+
+  const categoriesWithItems = categories.filter(cat => state.currentItems.some(it => !it.archived && (it.category||"Uncategorized") === cat));
+  const categoriesFullyPacked = categoriesWithItems.filter(cat => {
+    const inCat = state.currentItems.filter(it => !it.archived && (it.category||"Uncategorized") === cat);
+    return inCat.length && inCat.every(it => it.status === "packed");
+  }).length;
+
+  const eventMs = list.eventDate ? new Date(list.eventDate + "T00:00:00").getTime() : null;
+  const daysSinceEvent = eventMs ? Math.floor((Date.now() - eventMs) / 86400000) : null;
+  const inPostEventWindow = !list.archived && daysSinceEvent !== null && daysSinceEvent >= 0 && daysSinceEvent < AUTO_ARCHIVE_DAYS;
+  const archiveDate = eventMs ? new Date(eventMs + AUTO_ARCHIVE_DAYS*86400000).toLocaleDateString(undefined,{month:"short",day:"numeric"}) : null;
+
+  const categoryGroups = categories.map(cat => {
+    const catAll = items.filter(it => (it.category||"Uncategorized") === cat);
+    const catDisplay = catAll.filter(passesFilters);
+    return { cat, displayItems: catDisplay, totalCount: catAll.length };
+  });
+  if (items.some(it => !it.category)) {
+    const catAll = items.filter(it => !it.category);
+    const catDisplay = catAll.filter(passesFilters);
+    categoryGroups.push({ cat: "Uncategorized", displayItems: catDisplay, totalCount: catAll.length });
+  }
+
+  const customStatusEntries = getCustomStatusEntries(list, state.configDoc);
+  const customPeopleEntries = getCustomPeopleEntries(list, state.configDoc);
+
+  appEl.innerHTML = `
+    <div class="app-shell">
+    <a class="back-link" href="#/">\u2190 All checklists</a>
+    <div class="list-header">
+      <div class="title-row">
+        <h2 id="listName" contenteditable="true">${escapeHtml(list.name)}</h2>
+        <div class="user-badge"><div class="avatar">${initials(state.user)}</div> ${state.user}</div>
+        <div class="more-menu-wrap" style="margin-left:auto;">
+          <button id="moreMenuBtn">\u22EF</button>
+          ${state.moreMenuOpen ? `
+            <div class="more-menu" id="moreMenu">
+              <button id="themeToggle">${state.theme === "dark" ? "\u2600\uFE0F Light mode" : "\u{1F319} Dark mode"}</button>
+              <button id="dupBtn">\u{1F4CB} Duplicate as new list</button>
+              <button id="addStatusBtn">\u2795 Add custom status</button>
+              <button id="addPersonBtn">\u2795 Add "packing for" person</button>
+              ${customStatusEntries.map(c => `<button data-edit-status="${c.id}" data-scope="${c.scope}">\u270F\uFE0F Edit: ${c.icon} ${escapeHtml(c.label)}</button>`).join("")}
+              ${customPeopleEntries.map(p => `<button data-edit-person="${p.id}" data-scope="${p.scope}">\u270F\uFE0F Edit "packing for": ${escapeHtml(p.name)}</button>`).join("")}
+              <label><input type="checkbox" id="showArchivedItems" ${state.showArchivedItems?"checked":""}/> Show archived items</label>
+            </div>` : ""}
+        </div>
+      </div>
+
+      <div class="lh-stack">
+        <div class="lh-row">Event: <input type="date" id="eventDateInput" value="${list.eventDate || ""}" style="display:inline-block;width:auto;padding:0.2em 0.4em;" /></div>
+        <div class="lh-row" style="white-space:nowrap;overflow-x:auto;">Created ${relTime(list.createdAt)} \u00b7 Updated ${relTime(list.updatedAt)}${list.updatedBy ? " by " + escapeHtml(list.updatedBy) : ""}</div>
+
+        <div class="lh-progress">
+          <div class="progress-bar"><div style="width:${pct}%"></div></div>
+          <div class="muted">${packed}/${total} items packed \u00b7 ${categoriesFullyPacked}/${categoriesWithItems.length} categories fully packed</div>
+        </div>
+
+        <div class="lh-filters">
+          <div>
+            <div class="filter-label">Status</div>
+            <div class="status-filter-row">
+              ${effStatuses.map(s => {
+                const count = items.filter(it => it.status === s.id).length;
+                const active = state.statusFilter.has(s.id);
+                return `<button class="status-pill ${active?"active":""}" data-status-filter="${s.id}" style="--pill-color:${s.color}">${s.icon} ${s.label} <span class="pill-count">${count}</span></button>`;
+              }).join("")}
+            </div>
+          </div>
+          <div>
+            <div class="filter-label">Assigned to</div>
+            <div class="status-filter-row">
+              ${DEFAULT_USERS.map(u => {
+                const count = items.filter(it => it.assignedTo === u).length;
+                const active = state.assigneeFilter.has(u);
+                return `<button class="status-pill ${active?"active":""}" data-assignee-filter="${escapeHtml(u)}" style="--pill-color:var(--focus)">\u{1F464} ${escapeHtml(u)} <span class="pill-count">${count}</span></button>`;
+              }).join("")}
+              ${(() => {
+                const count = items.filter(it => !it.assignedTo).length;
+                const active = state.assigneeFilter.has("__unassigned__");
+                return `<button class="status-pill ${active?"active":""}" data-assignee-filter="__unassigned__" style="--pill-color:var(--text-dim)">Unassigned <span class="pill-count">${count}</span></button>`;
+              })()}
+            </div>
+          </div>
+          <div>
+            <div class="filter-label">Search</div>
+            <div class="search-box"><input type="text" id="textFilterInput" placeholder="Search items & notes" value="${escapeHtml(state.textFilter)}" /></div>
+          </div>
+          ${(state.statusFilter.size || state.assigneeFilter.size || state.textFilter) ? `<button class="ghost" id="clearAllFilters" style="align-self:flex-start;font-size:0.8rem;padding:0.2em 0.4em;">Clear filters</button>` : ""}
+        </div>
+
+        ${inPostEventWindow ? `
+          <div class="notes-banner">
+            Event's passed \u2014 this list auto-archives on ${archiveDate}. Jot notes for a better list next time:
+            <textarea id="retroNotes" rows="2" placeholder="e.g. bring more socks, skip the extra charger">${escapeHtml(list.retroNotes||"")}</textarea>
+          </div>` : ""}
+        ${list.archived && list.retroNotes ? `<div class="notes-banner"><strong>Notes from last time:</strong> ${escapeHtml(list.retroNotes)}</div>` : ""}
+      </div>
+    </div>
+
+    ${categoryGroups.map(g => renderCategoryBlock(g.cat, g.displayItems, g.totalCount)).join("")}
+    <div style="height:4.5rem;"></div>
+    </div>
+    ${state.selected.size ? "" : `<button class="fab" id="bulkInsertBtn" title="Add items">+</button>`}
+    ${state.selected.size ? renderBulkBar() : ""}
+    ${state.toast ? `<div class="toast">${state.toast}</div>` : ""}
+  `;
+
+  // header interactions
+  const nameEl = document.getElementById("listName");
+  nameEl.addEventListener("blur", async () => {
+    const v = nameEl.textContent.trim();
+    if (v && v !== list.name) await updateDoc(doc(db,"checklists",list.id), { name: v, updatedAt: serverTimestamp(), updatedBy: state.user });
+  });
+  document.getElementById("eventDateInput").addEventListener("change", async e => {
+    await updateDoc(doc(db,"checklists",list.id), { eventDate: e.target.value || null, updatedAt: serverTimestamp(), updatedBy: state.user });
+  });
+  document.getElementById("moreMenuBtn").onclick = (e) => { e.stopPropagation(); state.moreMenuOpen = !state.moreMenuOpen; render(); };
+  if (state.moreMenuOpen) {
+    document.getElementById("themeToggle").onclick = () => { state.moreMenuOpen = false; toggleTheme(); };
+    document.getElementById("dupBtn").onclick = () => { state.moreMenuOpen = false; render(); duplicateList(list); };
+    document.getElementById("addStatusBtn").onclick = () => { state.moreMenuOpen = false; render(); openStatusModal(list, null); };
+    document.getElementById("addPersonBtn").onclick = () => { state.moreMenuOpen = false; render(); openPersonModal(list, null); };
+    appEl.querySelectorAll("[data-edit-status]").forEach(btn => {
+      btn.onclick = () => {
+        state.moreMenuOpen = false; render();
+        const entry = customStatusEntries.find(c => c.id === btn.dataset.editStatus);
+        openStatusModal(list, entry);
+      };
+    });
+    appEl.querySelectorAll("[data-edit-person]").forEach(btn => {
+      btn.onclick = () => {
+        state.moreMenuOpen = false; render();
+        const entry = customPeopleEntries.find(p => p.id === btn.dataset.editPerson);
+        openPersonModal(list, entry);
+      };
+    });
+    document.getElementById("showArchivedItems").onchange = e => { state.showArchivedItems = e.target.checked; render(); };
+    setTimeout(() => document.addEventListener("click", () => { if (state.moreMenuOpen) { state.moreMenuOpen = false; render(); } }, { once: true }), 0);
+  }
+  const textFilterInput = document.getElementById("textFilterInput");
+  if (textFilterInput) textFilterInput.addEventListener("input", e => {
+    const cursorPos = e.target.selectionStart;
+    state.textFilter = e.target.value;
+    render();
+    const freshInput = document.getElementById("textFilterInput");
+    if (freshInput) { freshInput.focus(); freshInput.setSelectionRange(cursorPos, cursorPos); }
+  });
+  appEl.querySelectorAll("[data-assignee-filter]").forEach(btn => {
+    btn.onclick = () => {
+      const u = btn.dataset.assigneeFilter;
+      if (state.assigneeFilter.has(u)) state.assigneeFilter.delete(u); else state.assigneeFilter.add(u);
+      render();
+    };
+  });
+  const clearAllFiltersBtn = document.getElementById("clearAllFilters");
+  if (clearAllFiltersBtn) clearAllFiltersBtn.onclick = () => { state.statusFilter = new Set(); state.assigneeFilter = new Set(); state.textFilter = ""; render(); };
+  const retroNotesEl = document.getElementById("retroNotes");
+  if (retroNotesEl) {
+    retroNotesEl.addEventListener("blur", async () => {
+      const v = retroNotesEl.value.trim();
+      if (v !== (list.retroNotes||"")) await updateDoc(doc(db,"checklists",list.id), { retroNotes: v });
+    });
+  }
+  const bulkInsertBtn = document.getElementById("bulkInsertBtn");
+  if (bulkInsertBtn) bulkInsertBtn.onclick = () => openBulkInsertModal(categories, computeEffectivePeople(list, state.configDoc));
+  appEl.querySelectorAll("[data-status-filter]").forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.statusFilter;
+      if (state.statusFilter.has(id)) state.statusFilter.delete(id); else state.statusFilter.add(id);
+      render();
+    };
+  });
+
+  // per-item wiring
+  items.forEach(wireItemRow);
+  // category head + per-category menu wiring
+  categoryGroups.forEach(g => {
+    const cat = g.cat;
+    const headEl = document.getElementById(`cathead-${cssId(cat)}`);
+    const menuWrap = document.getElementById(`catmenuwrap-${cssId(cat)}`);
+    const menuBtn = document.getElementById(`catmenu-${cssId(cat)}`);
+    if (headEl) headEl.onclick = () => {
+      if (state.collapsedCategories.has(cat)) state.collapsedCategories.delete(cat); else state.collapsedCategories.add(cat);
+      render();
+    };
+    if (menuWrap) menuWrap.addEventListener("click", e => e.stopPropagation());
+    if (menuBtn) menuBtn.onclick = () => {
+      state.openCategoryMenu = state.openCategoryMenu === cat ? null : cat;
+      render();
+    };
+    if (state.openCategoryMenu === cat) {
+      const selectAllBtn = document.getElementById(`catSelectAll-${cssId(cat)}`);
+      const renameBtn = document.getElementById(`catRename-${cssId(cat)}`);
+      const deleteBtn = document.getElementById(`catDelete-${cssId(cat)}`);
+      if (selectAllBtn) selectAllBtn.onclick = () => {
+        g.displayItems.forEach(it => state.selected.add(it.id));
+        state.openCategoryMenu = null;
+        render();
+      };
+      if (renameBtn) renameBtn.onclick = () => {
+        state.openCategoryMenu = null;
+        const n = prompt("Rename category:", cat);
+        if (n) renameCategory(cat, n.trim());
+      };
+      if (deleteBtn) deleteBtn.onclick = () => { state.openCategoryMenu = null; deleteCategory(cat); };
+      setTimeout(() => document.addEventListener("click", () => { if (state.openCategoryMenu) { state.openCategoryMenu = null; render(); } }, { once: true }), 0);
+    }
+  });
+  // bulk bar wiring
+  if (state.selected.size) wireBulkBar(categories);
+}
+
+function renderCategoryBlock(cat, items, totalCount) {
+  const count = totalCount !== undefined ? totalCount : items.length;
+  const collapsed = state.collapsedCategories.has(cat);
+  const fullyPacked = count > 0 && items.length === count && items.every(it => it.status === "packed");
+  const menuOpen = state.openCategoryMenu === cat;
+  const headHtml = `
+      <div class="category-head ${fullyPacked ? "full" : ""}" id="cathead-${cssId(cat)}">
+        <span class="cat-head-left">
+          <span class="cat-chevron ${collapsed ? "collapsed" : ""}">\u25B6</span>
+          <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(cat)} <span class="muted">(${count})</span>${fullyPacked ? `<span class="cat-check">\u2713</span>` : ""}</span>
+        </span>
+        <div class="more-menu-wrap" id="catmenuwrap-${cssId(cat)}">
+          <button id="catmenu-${cssId(cat)}">\u22EF</button>
+          ${menuOpen ? `
+            <div class="more-menu" id="catmenu-panel-${cssId(cat)}">
+              <button id="catSelectAll-${cssId(cat)}">\u2611\uFE0F Select all in category</button>
+              <button id="catRename-${cssId(cat)}">Rename</button>
+              <button id="catDelete-${cssId(cat)}">Delete</button>
+            </div>` : ""}
+        </div>
+      </div>`;
+  if (!items.length || collapsed) return `<div class="category-block">${headHtml}</div>`;
+  return `
+    <div class="category-block">
+      ${headHtml}
+      <div class="items-columns">
+        ${items.map(renderItemRow).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderItemRow(it) {
+  const s = effStatusById[it.status] || statusById[it.status] || STATUSES[0];
+  return `
+    <div class="item-row ${it.archived?"archived":""}" data-id="${it.id}">
+      <input type="checkbox" data-select="${it.id}" ${state.selected.has(it.id)?"checked":""} />
+      <div class="item-main">
+        <div class="item-name">${escapeHtml(it.name)}<button class="edit-pencil-inline" data-edit="${it.id}" title="Edit item">\u270F\uFE0F</button></div>
+        <div class="item-sub">
+          ${it.packFor ? `<span class="tag-pack">\u{1F3F7}\uFE0F ${escapeHtml(it.packFor)}</span>` : ""}
+          ${it.assignedTo ? `\u{1F464} ${escapeHtml(it.assignedTo)}` : ""}
+          ${it.notes ? `\u{1F4DD} ${escapeHtml(it.notes)}` : ""}
+        </div>
+      </div>
+      <button class="status-chip" data-status-toggle="${it.id}" style="background:${s.color}">${s.icon} ${s.label}</button>
+    </div>
+  `;
+}
+
+function renderBulkBar() {
+  return `
+    <div class="bulk-bar">
+      <span>${state.selected.size} selected</span>
+      <select id="bulkStatusSel">
+        <option value="">Change status\u2026</option>
+        ${effStatuses.map(s => `<option value="${s.id}">${s.icon} ${s.label}</option>`).join("")}
+      </select>
+      <select id="bulkCatSel">
+        <option value="">Change category\u2026</option>
+      </select>
+      <select id="bulkAssignSel">
+        <option value="">Assign to\u2026</option>
+        ${DEFAULT_USERS.map(u => `<option value="${u}">\u{1F464} ${u}</option>`).join("")}
+        <option value="__none__">\u2014 Unassign</option>
+      </select>
+      <button id="bulkArchive">Archive</button>
+      <button id="bulkCancel">Cancel</button>
+    </div>
+  `;
+}
+
+function wireItemRow(it) {
+  const row = appEl.querySelector(`.item-row[data-id="${it.id}"]`);
+  if (!row) return;
+  row.querySelector("[data-select]").addEventListener("change", e => {
+    if (e.target.checked) state.selected.add(it.id); else state.selected.delete(it.id);
+    render();
+  });
+  const chip = row.querySelector("[data-status-toggle]");
+  let holdTimer = null, longPressed = false;
+  const openMenu = (x, y) => {
+    closeAnyMenu();
+    const menu = document.createElement("div");
+    menu.className = "status-menu";
+    menu.style.left = Math.min(x, window.innerWidth-220) + "px";
+    menu.style.top = y + "px";
+    menu.innerHTML = effStatuses.map(s => `<button data-set="${s.id}"><span class="status-dot" style="background:${s.color}"></span>${s.icon} ${s.label}</button>`).join("");
+    document.body.appendChild(menu);
+    menu.querySelectorAll("button").forEach(b => b.onclick = async () => {
+      await setStatus([it.id], b.dataset.set);
+      closeAnyMenu();
+    });
+    setTimeout(() => document.addEventListener("click", closeAnyMenu, { once: true }), 0);
+  };
+  chip.addEventListener("pointerdown", e => {
+    longPressed = false;
+    holdTimer = setTimeout(() => { longPressed = true; openMenu(e.clientX, e.clientY); }, 480);
+  });
+  chip.addEventListener("pointerup", () => {
+    clearTimeout(holdTimer);
+    if (!longPressed) cycleStatus(it);
+  });
+  chip.addEventListener("pointerleave", () => clearTimeout(holdTimer));
+  row.addEventListener("dblclick", () => openItemEditModal(it));
+  const editBtn = row.querySelector("[data-edit]");
+  if (editBtn) editBtn.addEventListener("click", e => { e.stopPropagation(); openItemEditModal(it); });
+}
+function closeAnyMenu() { document.querySelectorAll(".status-menu").forEach(m => m.remove()); }
+
+function wireBulkBar(categories) {
+  const catSel = document.getElementById("bulkCatSel");
+  categories.concat(["+ New category\u2026"]).forEach(c => {
+    const opt = document.createElement("option");
+    opt.value = c; opt.textContent = c;
+    catSel.appendChild(opt);
+  });
+  document.getElementById("bulkStatusSel").onchange = async e => {
+    if (!e.target.value) return;
+    await setStatus([...state.selected], e.target.value);
+    state.selected = new Set(); render();
+  };
+  catSel.onchange = async e => {
+    let val = e.target.value;
+    if (!val) return;
+    if (val === "+ New category\u2026") {
+      val = prompt("New category name:");
+      if (!val) return;
+    }
+    await setCategoryBulk([...state.selected], val);
+    state.selected = new Set(); render();
+  };
+  document.getElementById("bulkAssignSel").onchange = async e => {
+    if (!e.target.value) return;
+    const val = e.target.value === "__none__" ? "" : e.target.value;
+    await setAssigneeBulk([...state.selected], val);
+    state.selected = new Set(); render();
+  };
+  document.getElementById("bulkArchive").onclick = async () => {
+    await archiveItems([...state.selected], true);
+    state.selected = new Set(); render();
+  };
+  document.getElementById("bulkCancel").onclick = () => { state.selected = new Set(); render(); };
+}
+
+function cssId(s) { return s.replace(/[^a-z0-9]/gi, "_"); }
+function escapeHtml(s) { return (s||"").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c])); }
+
+/* ============================= MODALS ============================= */
+function openModal(html) {
+  const wrap = document.createElement("div");
+  wrap.className = "modal-backdrop";
+  wrap.innerHTML = `<div class="modal">${html}</div>`;
+  document.body.appendChild(wrap);
+  wrap.addEventListener("click", e => { if (e.target === wrap) wrap.remove(); });
+  return wrap;
+}
+
+function openNewListModal() {
+  const wrap = openModal(`
+    <h3>New checklist</h3>
+    <div class="field"><label>Name</label><input type="text" id="nlName" placeholder="e.g. Lake trip packing" /></div>
+    <div class="field"><label>Event date (optional)</label><input type="date" id="nlDate" /></div>
+    <div class="modal-actions"><button id="nlCancel">Cancel</button><button class="primary" id="nlCreate">Create</button></div>
+  `);
+  wrap.querySelector("#nlCancel").onclick = () => wrap.remove();
+  wrap.querySelector("#nlCreate").onclick = () => {
+    const name = wrap.querySelector("#nlName").value.trim();
+    if (!name) return;
+    const eventDate = wrap.querySelector("#nlDate").value || null;
+    createList(name, eventDate);
+    wrap.remove();
+  };
+}
+
+function openBulkInsertModal(categories, peopleList) {
+  const wrap = openModal(`
+    <h3>Add items</h3>
+    <div class="field">
+      <label>Items (one per line)</label>
+      <textarea id="biText" rows="6" placeholder="Sunscreen&#10;Swim goggles [Harper, Beckett]&#10;Toothbrush [Everyone]"></textarea>
+      <div class="muted" style="margin-top:0.3rem;">Tip: add <code>[Name, Name]</code> to a line to create one copy per person, or <code>[Everyone]</code> for the whole household. Tap a chip to insert it at your cursor.</div>
+      <div class="people-chips" id="peopleChips">
+        ${peopleList.map(p => `<button type="button" class="people-chip" data-person="${escapeHtml(p)}">${escapeHtml(p)}</button>`).join("")}
+        <button type="button" class="people-chip" data-person="Everyone">Everyone</button>
+      </div>
+    </div>
+    <div class="field"><label>Category</label>
+      <select id="biCat">
+        <option value="__auto__">Auto-detect per item</option>
+        ${categories.map(c => `<option value="${c}">${c}</option>`).join("")}
+        <option value="__new__">+ New category\u2026</option>
+      </select>
+    </div>
+    <div class="field"><label>Starting status</label>
+      <select id="biStatus">
+        ${effStatuses.map(s => `<option value="${s.id}" ${s.id==="idea"?"selected":""}>${s.icon} ${s.label}</option>`).join("")}
+      </select>
+    </div>
+    <div class="modal-actions"><button id="biCancel">Cancel</button><button class="primary" id="biAdd">Add items</button></div>
+  `);
+  wrap.querySelector("#biCancel").onclick = () => wrap.remove();
+  const biText = wrap.querySelector("#biText");
+  wrap.querySelectorAll("[data-person]").forEach(chip => {
+    chip.onclick = () => {
+      const tag = `[${chip.dataset.person}]`;
+      const start = biText.selectionStart ?? biText.value.length;
+      const end = biText.selectionEnd ?? biText.value.length;
+      if (biText.setRangeText) {
+        biText.setRangeText(tag, start, end, "end");
+      } else {
+        biText.value = biText.value.slice(0, start) + tag + biText.value.slice(end);
+      }
+      biText.focus();
+    };
+  });
+  wrap.querySelector("#biCat").addEventListener("change", e => {
+    if (e.target.value === "__new__") {
+      const n = prompt("New category name:");
+      if (n) {
+        const opt = document.createElement("option");
+        opt.value = n; opt.textContent = n; opt.selected = true;
+        e.target.insertBefore(opt, e.target.lastElementChild);
+      } else {
+        e.target.value = "__auto__";
+      }
+    }
+  });
+  wrap.querySelector("#biAdd").onclick = async () => {
+    const text = wrap.querySelector("#biText").value;
+    const cat = wrap.querySelector("#biCat").value;
+    const status = wrap.querySelector("#biStatus").value;
+    await addItemsBulk(state.current.id, text, cat, status);
+    wrap.remove();
+  };
+}
+
+function openItemEditModal(it) {
+  const peopleList = computeEffectivePeople(state.current, state.configDoc);
+  let selectedAssignee = it.assignedTo || "";
+  let selectedPackFor = it.packFor || "";
+  const wrap = openModal(`
+    <h3>Edit item</h3>
+    <div class="field"><label>Name</label><input type="text" id="ieName" value="${escapeHtml(it.name)}" /></div>
+    <div class="field"><label>Notes (optional)</label><input type="text" id="ieNotes" value="${escapeHtml(it.notes||"")}" /></div>
+    <div class="field">
+      <label>Packing for (whose item, optional)</label>
+      <div class="chip-select-row" id="iePackForChips">
+        ${peopleList.map(p => `<button type="button" class="chip-select ${p===selectedPackFor?"active":""}" data-pack="${escapeHtml(p)}">${escapeHtml(p)}</button>`).join("")}
+      </div>
+    </div>
+    <div class="field">
+      <label>Assigned to (who's responsible, optional)</label>
+      <div class="chip-select-row" id="ieAssignedChips">
+        ${DEFAULT_USERS.map(u => `<button type="button" class="chip-select ${u===selectedAssignee?"active":""}" data-assignee="${escapeHtml(u)}">${escapeHtml(u)}</button>`).join("")}
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="danger" id="ieDelete" style="margin-right:auto;">Archive item</button>
+      <button id="ieCancel">Cancel</button>
+      <button class="primary" id="ieSave">Save</button>
+    </div>
+  `);
+  wrap.querySelectorAll("#iePackForChips [data-pack]").forEach(chip => {
+    chip.onclick = () => {
+      selectedPackFor = selectedPackFor === chip.dataset.pack ? "" : chip.dataset.pack;
+      wrap.querySelectorAll("#iePackForChips [data-pack]").forEach(c => c.classList.toggle("active", c.dataset.pack === selectedPackFor));
+    };
+  });
+  wrap.querySelectorAll("#ieAssignedChips [data-assignee]").forEach(chip => {
+    chip.onclick = () => {
+      selectedAssignee = selectedAssignee === chip.dataset.assignee ? "" : chip.dataset.assignee;
+      wrap.querySelectorAll("#ieAssignedChips [data-assignee]").forEach(c => c.classList.toggle("active", c.dataset.assignee === selectedAssignee));
+    };
+  });
+  wrap.querySelector("#ieCancel").onclick = () => wrap.remove();
+  wrap.querySelector("#ieDelete").onclick = async () => {
+    await updateDoc(doc(db, "checklists", state.current.id, "items", it.id), { archived: true });
+    wrap.remove();
+  };
+  wrap.querySelector("#ieSave").onclick = async () => {
+    const name = wrap.querySelector("#ieName").value.trim();
+    const notes = wrap.querySelector("#ieNotes").value.trim();
+    if (!name) return;
+    await updateDoc(doc(db, "checklists", state.current.id, "items", it.id), { name, notes, packFor: selectedPackFor, assignedTo: selectedAssignee });
+    wrap.remove();
+  };
+}
+
+async function upsertCustomStatus(scope, list, entry) {
+  if (scope === "global") {
+    const arr = ((state.configDoc && state.configDoc.customStatuses) || []).filter(c => c.id !== entry.id);
+    arr.push(entry);
+    await updateDoc(doc(db, "meta", "config"), { customStatuses: arr });
+  } else {
+    const arr = (list.customStatuses || []).filter(c => c.id !== entry.id);
+    arr.push(entry);
+    await updateDoc(doc(db, "checklists", list.id), { customStatuses: arr });
+  }
+}
+async function removeCustomStatus(scope, list, id) {
+  if (scope === "global") {
+    const arr = ((state.configDoc && state.configDoc.customStatuses) || []).filter(c => c.id !== id);
+    await updateDoc(doc(db, "meta", "config"), { customStatuses: arr });
+  } else {
+    const arr = (list.customStatuses || []).filter(c => c.id !== id);
+    await updateDoc(doc(db, "checklists", list.id), { customStatuses: arr });
+  }
+}
+async function upsertCustomPerson(scope, list, entry) {
+  if (scope === "global") {
+    const arr = ((state.configDoc && state.configDoc.customPeople) || []).filter(p => p.id !== entry.id);
+    arr.push(entry);
+    await updateDoc(doc(db, "meta", "config"), { customPeople: arr });
+  } else {
+    const arr = (list.customPeople || []).filter(p => p.id !== entry.id);
+    arr.push(entry);
+    await updateDoc(doc(db, "checklists", list.id), { customPeople: arr });
+  }
+}
+async function removeCustomPerson(scope, list, id) {
+  if (scope === "global") {
+    const arr = ((state.configDoc && state.configDoc.customPeople) || []).filter(p => p.id !== id);
+    await updateDoc(doc(db, "meta", "config"), { customPeople: arr });
+  } else {
+    const arr = (list.customPeople || []).filter(p => p.id !== id);
+    await updateDoc(doc(db, "checklists", list.id), { customPeople: arr });
+  }
+}
+
+// existing = null for "add", or a custom-status entry (with .scope) for "edit"
+function openStatusModal(list, existing) {
+  const isEdit = !!existing;
+  const positionOptions = `<option value="__start__" ${isEdit && existing.insertAfter===null ? "selected" : ""}>At the very beginning</option>`
+    + effStatuses.filter(s => !existing || s.id !== existing.id)
+        .map(s => `<option value="${s.id}" ${isEdit && existing.insertAfter===s.id ? "selected" : ""}>After: ${s.icon} ${s.label}</option>`)
+        .join("");
+  const wrap = openModal(`
+    <h3>${isEdit ? "Edit" : "Add"} custom status</h3>
+    <div class="field"><label>Name</label><input type="text" id="csName" placeholder="e.g. Borrowed" value="${isEdit?escapeHtml(existing.label):""}" /></div>
+    <div class="field"><label>Icon (emoji, optional)</label><input type="text" id="csIcon" placeholder="\u{1F516}" maxlength="4" value="${isEdit?escapeHtml(existing.icon||""):""}" /></div>
+    <div class="field"><label>Color</label><input type="color" id="csColor" value="${isEdit?existing.color:"#7a6a53"}" style="height:2.6em;padding:0.2em;" /></div>
+    <div class="field">
+      <label>Where should it apply?</label>
+      <select id="csScope">
+        <option value="local" ${!isEdit || existing.scope==="local"?"selected":""}>This checklist only</option>
+        <option value="global" ${isEdit && existing.scope==="global"?"selected":""}>All checklists</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Position in the status order</label>
+      <select id="csPosition">${positionOptions}</select>
+    </div>
+    <div class="modal-actions">
+      ${isEdit ? `<button class="danger" id="csDelete" style="margin-right:auto;">Delete</button>` : ""}
+      <button id="csCancel">Cancel</button>
+      <button class="primary" id="csAdd">${isEdit ? "Save" : "Add status"}</button>
+    </div>
+  `);
+  wrap.querySelector("#csCancel").onclick = () => wrap.remove();
+  if (isEdit) {
+    wrap.querySelector("#csDelete").onclick = async () => {
+      await removeCustomStatus(existing.scope, list, existing.id);
+      showToast(`Deleted "${existing.label}" status`);
+      wrap.remove();
+    };
+  }
+  wrap.querySelector("#csAdd").onclick = async () => {
+    const label = wrap.querySelector("#csName").value.trim();
+    if (!label) return;
+    const icon = wrap.querySelector("#csIcon").value.trim() || "\u{1F516}";
+    const color = wrap.querySelector("#csColor").value || "#7a6a53";
+    const scope = wrap.querySelector("#csScope").value;
+    const posVal = wrap.querySelector("#csPosition").value;
+    const entry = {
+      id: isEdit ? existing.id : "custom_" + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+      label, icon, color,
+      insertAfter: posVal === "__start__" ? null : posVal,
+      createdAt: isEdit ? existing.createdAt : Date.now()
+    };
+    if (isEdit && existing.scope !== scope) await removeCustomStatus(existing.scope, list, existing.id);
+    await upsertCustomStatus(scope, list, entry);
+    showToast(`${isEdit ? "Updated" : "Added"} "${label}" status`);
+    wrap.remove();
+  };
+}
+
+// existing = null for "add", or a custom-person entry (with .scope) for "edit"
+function openPersonModal(list, existing) {
+  const isEdit = !!existing;
+  const wrap = openModal(`
+    <h3>${isEdit ? "Edit" : "Add"} "packing for" person</h3>
+    <p class="muted" style="margin-top:-0.4rem;">This adds someone to the "packing for" list on items (whose stuff it is) \u2014 not the "assigned to" list (who's responsible for getting it).</p>
+    <div class="field"><label>Name</label><input type="text" id="cpName" placeholder="e.g. Grandma" value="${isEdit?escapeHtml(existing.name):""}" /></div>
+    <div class="field">
+      <label>Where should it apply?</label>
+      <select id="cpScope">
+        <option value="local" ${!isEdit || existing.scope==="local"?"selected":""}>This checklist only</option>
+        <option value="global" ${isEdit && existing.scope==="global"?"selected":""}>All checklists</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      ${isEdit ? `<button class="danger" id="cpDelete" style="margin-right:auto;">Delete</button>` : ""}
+      <button id="cpCancel">Cancel</button>
+      <button class="primary" id="cpAdd">${isEdit ? "Save" : "Add person"}</button>
+    </div>
+  `);
+  wrap.querySelector("#cpCancel").onclick = () => wrap.remove();
+  if (isEdit) {
+    wrap.querySelector("#cpDelete").onclick = async () => {
+      await removeCustomPerson(existing.scope, list, existing.id);
+      showToast(`Removed "${existing.name}"`);
+      wrap.remove();
+    };
+  }
+  wrap.querySelector("#cpAdd").onclick = async () => {
+    const name = wrap.querySelector("#cpName").value.trim();
+    if (!name) return;
+    const scope = wrap.querySelector("#cpScope").value;
+    const entry = {
+      id: isEdit ? existing.id : "person_" + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+      name,
+      createdAt: isEdit ? existing.createdAt : Date.now()
+    };
+    if (isEdit && existing.scope !== scope) await removeCustomPerson(existing.scope, list, existing.id);
+    await upsertCustomPerson(scope, list, entry);
+    showToast(`${isEdit ? "Updated" : "Added"} "${name}"`);
+    wrap.remove();
+  };
+}
+
+/* ============================= BOOT ============================= */
+function bootAfterAuth() {
+  render();
+  mountRoute();
+}
+function mountRoute() {
+  if (!state.pinOk || !state.user) { render(); return; }
+  if (state.route.name === "overview") {
+    if (unsubCurrent) { unsubCurrent(); unsubCurrent = null; }
+    if (unsubItems) { unsubItems(); unsubItems = null; }
+    state.current = null; state.currentItems = [];
+    listenLists();
+    render();
+  } else if (state.route.name === "list") {
+    if (unsubLists) { unsubLists(); unsubLists = null; }
+    listenCurrent(state.route.id);
+    render();
+  }
+}
+
+initConfigListener().then(() => {
+  render();
+  if (state.pinOk && state.user) mountRoute();
+});
+</script>
+</body>
+</html>
