@@ -305,6 +305,16 @@
   .lh-filters { display: flex; flex-direction: column; gap: 0.5rem; }
   .filter-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); font-weight: 700; }
 
+  .filters-more { border: 1px solid var(--border); border-radius: 10px; padding: 0 0.7rem; }
+  .filters-more summary {
+    cursor: pointer; padding: 0.55rem 0; font-size: 0.72rem; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--text-dim); font-weight: 700; list-style: none;
+  }
+  .filters-more summary::-webkit-details-marker { display: none; }
+  .filters-more summary::before { content: "\25B8 "; }
+  .filters-more[open] summary::before { content: "\25BE "; }
+  .filters-more .status-filter-row { padding-bottom: 0.7rem; }
+
   /* ---------- chip select (assigned to / packing for) ---------- */
   .chip-select-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
   .chip-select {
@@ -423,6 +433,8 @@ let state = {
   selected: new Set(),
   statusFilter: new Set(),
   assigneeFilter: new Set(),
+  packForFilter: new Set(),
+  packForDetailsOpen: false,
   textFilter: "",
   collapsedCategories: new Set(),
   toast: null,
@@ -444,7 +456,7 @@ function parseRoute() {
   if (h.startsWith("list/")) return { name: "list", id: h.slice(5) };
   return { name: "overview" };
 }
-window.addEventListener("hashchange", () => { state.route = parseRoute(); state.selected = new Set(); state.statusFilter = new Set(); state.assigneeFilter = new Set(); state.textFilter = ""; mountRoute(); });
+window.addEventListener("hashchange", () => { state.route = parseRoute(); state.selected = new Set(); state.statusFilter = new Set(); state.assigneeFilter = new Set(); state.packForFilter = new Set(); state.textFilter = ""; mountRoute(); });
 
 function showToast(msg) {
   state.toast = msg;
@@ -837,11 +849,52 @@ function renderListCard(l) {
   `;
 }
 
+const SORT_OPTIONS = [
+  { id: "alpha", label: "Alphanumeric" },
+  { id: "packfor", label: "Packing for" },
+];
+// Sort choice is a personal display preference, not shared data - stored locally per device/user, not in Firestore.
+function getLocalSort(listId) {
+  try {
+    const raw = localStorage.getItem(`cl_sort_${listId}`);
+    if (!raw) return { primary: null, secondary: null };
+    const parsed = JSON.parse(raw);
+    return { primary: parsed.primary || null, secondary: parsed.secondary || null };
+  } catch { return { primary: null, secondary: null }; }
+}
+function setLocalSort(listId, primary, secondary) {
+  localStorage.setItem(`cl_sort_${listId}`, JSON.stringify({ primary, secondary }));
+}
+function compareBy(key, a, b) {
+  if (key === "alpha") return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+  if (key === "packfor") {
+    const pa = a.packFor || "", pb = b.packFor || "";
+    if (!pa && pb) return 1;
+    if (pa && !pb) return -1;
+    if (!pa && !pb) return 0;
+    return pa.localeCompare(pb, undefined, { sensitivity: "base", numeric: true });
+  }
+  return 0;
+}
+function sortItems(items, primary, secondary) {
+  const arr = [...items];
+  arr.sort((a, b) => {
+    let r = primary ? compareBy(primary, a, b) : 0;
+    if (r === 0 && secondary) r = compareBy(secondary, a, b);
+    return r;
+  });
+  return arr;
+}
+
 function passesFilters(it) {
   if (state.statusFilter.size && !state.statusFilter.has(it.status)) return false;
   if (state.assigneeFilter.size) {
     const matchesAssignee = it.assignedTo ? state.assigneeFilter.has(it.assignedTo) : state.assigneeFilter.has("__unassigned__");
     if (!matchesAssignee) return false;
+  }
+  if (state.packForFilter.size) {
+    const matchesPackFor = it.packFor ? state.packForFilter.has(it.packFor) : state.packForFilter.has("__unassigned__");
+    if (!matchesPackFor) return false;
   }
   if (state.textFilter) {
     const q = state.textFilter.toLowerCase();
@@ -876,14 +929,15 @@ function renderListDetail() {
   const inPostEventWindow = !list.archived && daysSinceEvent !== null && daysSinceEvent >= 0 && daysSinceEvent < AUTO_ARCHIVE_DAYS;
   const archiveDate = eventMs ? new Date(eventMs + AUTO_ARCHIVE_DAYS*86400000).toLocaleDateString(undefined,{month:"short",day:"numeric"}) : null;
 
+  const localSort = getLocalSort(list.id);
   const categoryGroups = categories.map(cat => {
     const catAll = items.filter(it => (it.category||"Uncategorized") === cat);
-    const catDisplay = catAll.filter(passesFilters);
+    const catDisplay = sortItems(catAll.filter(passesFilters), localSort.primary, localSort.secondary);
     return { cat, displayItems: catDisplay, totalCount: catAll.length };
   });
   if (items.some(it => !it.category)) {
     const catAll = items.filter(it => !it.category);
-    const catDisplay = catAll.filter(passesFilters);
+    const catDisplay = sortItems(catAll.filter(passesFilters), localSort.primary, localSort.secondary);
     categoryGroups.push({ cat: "Uncategorized", displayItems: catDisplay, totalCount: catAll.length });
   }
 
@@ -897,7 +951,7 @@ function renderListDetail() {
       <div class="title-row">
         <h2 id="listName" contenteditable="true">${escapeHtml(list.name)}</h2>
         <div class="user-badge"><div class="avatar">${initials(state.user)}</div> ${state.user}</div>
-        <div class="more-menu-wrap" style="margin-left:auto;">
+        <div class="more-menu-wrap" id="headerMoreMenuWrap" style="margin-left:auto;">
           <button id="moreMenuBtn">\u22EF</button>
           ${state.moreMenuOpen ? `
             <div class="more-menu" id="moreMenu">
@@ -908,6 +962,19 @@ function renderListDetail() {
               ${customStatusEntries.map(c => `<button data-edit-status="${c.id}" data-scope="${c.scope}">\u270F\uFE0F Edit: ${c.icon} ${escapeHtml(c.label)}</button>`).join("")}
               ${customPeopleEntries.map(p => `<button data-edit-person="${p.id}" data-scope="${p.scope}">\u270F\uFE0F Edit "packing for": ${escapeHtml(p.name)}</button>`).join("")}
               <label><input type="checkbox" id="showArchivedItems" ${state.showArchivedItems?"checked":""}/> Show archived items</label>
+              <div style="padding:0.6em 0.6em 0.3em;">
+                <div class="filter-label" style="margin-bottom:0.35rem;">Sort within category (just for you)</div>
+                <div class="row-gap">
+                  <select id="sortPrimarySel">
+                    <option value="">Sort by\u2026</option>
+                    ${SORT_OPTIONS.map(o => `<option value="${o.id}" ${localSort.primary===o.id?"selected":""}>${o.label}</option>`).join("")}
+                  </select>
+                  <select id="sortSecondarySel">
+                    <option value="">Then by\u2026</option>
+                    ${SORT_OPTIONS.map(o => `<option value="${o.id}" ${localSort.secondary===o.id?"selected":""}>${o.label}</option>`).join("")}
+                  </select>
+                </div>
+              </div>
             </div>` : ""}
         </div>
       </div>
@@ -947,11 +1014,26 @@ function renderListDetail() {
               })()}
             </div>
           </div>
+          <details class="filters-more" id="packForDetails" ${state.packForDetailsOpen ? "open" : ""}>
+            <summary>Packing for</summary>
+            <div class="status-filter-row">
+              ${computeEffectivePeople(list, state.configDoc).map(p => {
+                const count = items.filter(it => it.packFor === p).length;
+                const active = state.packForFilter.has(p);
+                return `<button class="status-pill ${active?"active":""}" data-packfor-filter="${escapeHtml(p)}" style="--pill-color:var(--accent)">\u{1F3F7}\uFE0F ${escapeHtml(p)} <span class="pill-count">${count}</span></button>`;
+              }).join("")}
+              ${(() => {
+                const count = items.filter(it => !it.packFor).length;
+                const active = state.packForFilter.has("__unassigned__");
+                return `<button class="status-pill ${active?"active":""}" data-packfor-filter="__unassigned__" style="--pill-color:var(--text-dim)">None <span class="pill-count">${count}</span></button>`;
+              })()}
+            </div>
+          </details>
           <div>
             <div class="filter-label">Search</div>
             <div class="search-box"><input type="text" id="textFilterInput" placeholder="Search items & notes" value="${escapeHtml(state.textFilter)}" /></div>
           </div>
-          ${(state.statusFilter.size || state.assigneeFilter.size || state.textFilter) ? `<button class="ghost" id="clearAllFilters" style="align-self:flex-start;font-size:0.8rem;padding:0.2em 0.4em;">Clear filters</button>` : ""}
+          ${(state.statusFilter.size || state.assigneeFilter.size || state.packForFilter.size || state.textFilter) ? `<button class="ghost" id="clearAllFilters" style="align-self:flex-start;font-size:0.8rem;padding:0.2em 0.4em;">Clear filters</button>` : ""}
         </div>
 
         ${inPostEventWindow ? `
@@ -982,6 +1064,7 @@ function renderListDetail() {
   });
   document.getElementById("moreMenuBtn").onclick = (e) => { e.stopPropagation(); state.moreMenuOpen = !state.moreMenuOpen; render(); };
   if (state.moreMenuOpen) {
+    document.getElementById("headerMoreMenuWrap").addEventListener("click", e => e.stopPropagation());
     document.getElementById("themeToggle").onclick = () => { state.moreMenuOpen = false; toggleTheme(); };
     document.getElementById("dupBtn").onclick = () => { state.moreMenuOpen = false; render(); duplicateList(list); };
     document.getElementById("addStatusBtn").onclick = () => { state.moreMenuOpen = false; render(); openStatusModal(list, null); };
@@ -1001,6 +1084,14 @@ function renderListDetail() {
       };
     });
     document.getElementById("showArchivedItems").onchange = e => { state.showArchivedItems = e.target.checked; render(); };
+    document.getElementById("sortPrimarySel").addEventListener("change", e => {
+      setLocalSort(list.id, e.target.value || null, localSort.secondary);
+      render();
+    });
+    document.getElementById("sortSecondarySel").addEventListener("change", e => {
+      setLocalSort(list.id, localSort.primary, e.target.value || null);
+      render();
+    });
     setTimeout(() => document.addEventListener("click", () => { if (state.moreMenuOpen) { state.moreMenuOpen = false; render(); } }, { once: true }), 0);
   }
   const textFilterInput = document.getElementById("textFilterInput");
@@ -1018,8 +1109,17 @@ function renderListDetail() {
       render();
     };
   });
+  appEl.querySelectorAll("[data-packfor-filter]").forEach(btn => {
+    btn.onclick = () => {
+      const p = btn.dataset.packforFilter;
+      if (state.packForFilter.has(p)) state.packForFilter.delete(p); else state.packForFilter.add(p);
+      render();
+    };
+  });
+  const packForDetails = document.getElementById("packForDetails");
+  if (packForDetails) packForDetails.addEventListener("toggle", () => { state.packForDetailsOpen = packForDetails.open; });
   const clearAllFiltersBtn = document.getElementById("clearAllFilters");
-  if (clearAllFiltersBtn) clearAllFiltersBtn.onclick = () => { state.statusFilter = new Set(); state.assigneeFilter = new Set(); state.textFilter = ""; render(); };
+  if (clearAllFiltersBtn) clearAllFiltersBtn.onclick = () => { state.statusFilter = new Set(); state.assigneeFilter = new Set(); state.packForFilter = new Set(); state.textFilter = ""; render(); };
   const retroNotesEl = document.getElementById("retroNotes");
   if (retroNotesEl) {
     retroNotesEl.addEventListener("blur", async () => {
